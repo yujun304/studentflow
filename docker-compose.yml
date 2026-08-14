@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: studentflow
+      POSTGRES_USER: studentflow
+      POSTGRES_PASSWORD: studentflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - studentflow_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U studentflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://studentflow:studentflow@postgres:5432/studentflow
+      FRONTEND_ORIGIN: ${COMPOSE_FRONTEND_ORIGIN:-http://localhost:8081}
+      JWT_SECRET: ${JWT_SECRET:-development-secret-change-before-production-1234}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      STORAGE_ROOT: /data/uploads
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-/run/secrets/studentflow-vapid/private_key.pem}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:studentflow@localhost}
+    volumes:
+      - studentflow_uploads:/data/uploads
+      - ./.data/vapid:/run/secrets/studentflow-vapid:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./studentflow
+    ports:
+      - "${COMPOSE_FRONTEND_PORT:-8081}:80"
+    depends_on:
+      - backend
+
+volumes:
+  studentflow_postgres:
+  studentflow_uploads:
