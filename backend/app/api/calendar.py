@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import csrf_protect, current_user
 from app.models.entities import (
+    CommunityPost,
     Event,
     EventParticipant,
     EventType,
@@ -36,6 +37,17 @@ TASK_SOURCES = {
     TaskType.SIMPLE: "TASK_DEADLINE",
     TaskType.SUBMISSION: "SUBMISSION_DEADLINE",
     TaskType.TEAM_FORMATION: "TEAM_FORMATION_DEADLINE",
+}
+COMMUNITY_MEETING_COLOR = "#7c3aed"
+COMMUNITY_MEETING_DEFAULT_TIMES = {
+    "MORNING": time(8, 0),
+    "LUNCH": time(12, 30),
+    "AFTER_SCHOOL": time(16, 0),
+}
+COMMUNITY_MEETING_SLOT_NAMES = {
+    "MORNING": "아침시간",
+    "LUNCH": "점심시간",
+    "AFTER_SCHOOL": "방과후",
 }
 
 
@@ -107,6 +119,20 @@ async def calendar_items(
             )
         ).all()
     )
+    community_meetings: list[CommunityPost] = []
+    if user.role in {Role.DEPARTMENT_HEAD, Role.EXECUTIVE_BOARD}:
+        community_meetings = list(
+            (
+                await db.scalars(
+                    select(CommunityPost).where(
+                        CommunityPost.term_id == user.term_id,
+                        CommunityPost.agenda_at.is_not(None),
+                        CommunityPost.meeting_date >= start,
+                        CommunityPost.meeting_date <= end,
+                    )
+                )
+            ).all()
+        )
 
     result: list[CalendarItemOut] = []
     for event in events:
@@ -145,6 +171,25 @@ async def calendar_items(
             editable=reminder.category == "PERSONAL",
         )
         for reminder in reminders
+    )
+    result.extend(
+        CalendarItemOut(
+            id=f"community-meeting:{meeting.id}",
+            source="COMMUNITY_MEETING",
+            title=f"부장회의 · {meeting.title}",
+            description=(
+                f"{COMMUNITY_MEETING_SLOT_NAMES.get(meeting.meeting_time_slot or '', '시간 미정')}"
+                + (f" · {meeting.meeting_time.strftime('%H:%M')}" if meeting.meeting_time else "")
+            ),
+            starts_at=local_datetime(
+                meeting.meeting_date,
+                meeting.meeting_time
+                or COMMUNITY_MEETING_DEFAULT_TIMES.get(meeting.meeting_time_slot or ""),
+            ),
+            color=COMMUNITY_MEETING_COLOR,
+        )
+        for meeting in community_meetings
+        if meeting.meeting_date is not None
     )
     return sorted(result, key=utc_sort_key)
 

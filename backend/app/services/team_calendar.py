@@ -5,7 +5,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
-from app.models.entities import EventParticipant, Reminder, Team, TeamMember, User
+from app.models.entities import Event, EventParticipant, Reminder, Team, TeamMember, User
 
 TEAM_REMINDER_COLOR = "#059669"
 ALLOWED_CALENDAR_COLORS = {
@@ -66,7 +66,15 @@ async def sync_team_reminders(db: AsyncSession, team: Team, member_ids: set[uuid
     await db.flush()
     if not team.schedule_at:
         return
-    detail = " · ".join(value for value in [team.role_description, team.description] if value)
+    event = await db.get(Event, team.event_id) if team.event_id else None
+    detail_parts = [
+        f"행사: {event.title}" if event else None,
+        f"행사 설명: {event.description}" if event and event.description else None,
+        f"집합 위치: {event.location}" if event and event.location else None,
+        f"역할: {team.role_description}" if team.role_description else None,
+        f"준비 사항: {team.description}" if team.description else None,
+    ]
+    detail = "\n".join(value for value in detail_parts if value)
     db.add_all(
         [
             Reminder(

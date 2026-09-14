@@ -44,7 +44,11 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const error = await response.json().catch(() => ({ code: "unknown", detail: "요청을 처리하지 못했습니다." }));
     throw new ApiError(response.status, error.code ?? "unknown", error.detail ?? "요청을 처리하지 못했습니다.");
   }
-  if (["/auth/login", "/auth/refresh", "/auth/logout"].includes(path)) csrfToken = "";
+  if (
+    ["/auth/login", "/auth/refresh", "/auth/logout"].includes(path) ||
+    path.startsWith("/auth/test-switch/")
+  )
+    csrfToken = "";
   if (response.status === 204) return undefined as T;
   return response.json();
 }

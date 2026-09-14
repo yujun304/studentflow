@@ -86,10 +86,14 @@ def notification_url(target_type: str | None, target_id: uuid.UUID | None) -> st
         "event": "/events",
         "notice": "/announcements",
         "submission": "/submissions",
+        "community": "/community",
+        "proposal": "/proposals",
     }
     base = routes.get(target_type, "/notifications")
     return (
-        f"{base}/{target_id}" if target_id and target_type in {"task", "event", "notice"} else base
+        f"{base}/{target_id}"
+        if target_id and target_type in {"task", "event", "notice", "proposal"}
+        else base
     )
 
 

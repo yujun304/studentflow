@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.api.notices import list_notices, update_notice
+from app.api.notices import delete_notice, list_notices, update_notice
 from app.core.database import Base
 from app.models.entities import Notice, NoticeRecipient, NoticeType, Role, Term, User
 from app.schemas import NoticeUpdate
@@ -72,5 +72,8 @@ async def test_notice_editor_receives_recipients_and_can_update_notice():
         )
         assert updated.title == "준비물 변경 안내"
         assert set(updated.recipient_ids) == {teacher.id, member.id}
+
+        await delete_notice(notice.id, teacher, db)
+        assert await db.get(Notice, notice.id) is None
 
     await engine.dispose()

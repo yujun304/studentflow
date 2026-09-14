@@ -1,7 +1,60 @@
-/** StudentFlow | 학기 운영 보드: 조 편성은 구성원 충돌을 말로 보여 주고 확인 후 옮긴다 */
-import { ArrowRightLeft, ShieldAlert } from "lucide-react";
-import { useState } from "react";
+/** StudentFlow | 승인된 조 편성과 개인 배정 내용을 확인한다. */
+import { Crown, UsersRound } from "lucide-react";
 import { useApp } from "@/contexts/AppContext";
-import { AppModal, Button, PermissionState, SelectField } from "@/components/primitives";
-export default function TeamsPage() { const { teams, currentRole, moveTeamMember } = useApp(); const [from, setFrom] = useState(""); const [member, setMember] = useState(""); const [to, setTo] = useState(""); const [open, setOpen] = useState(false); const [moved, setMoved] = useState(""); const canEdit = ["DEPARTMENT_HEAD", "EXECUTIVE_BOARD", "TEACHER"].includes(currentRole); const fromTeam = teams.find((team) => team.id === from); function prepare(teamId: string, name: string) { setFrom(teamId); setMember(name); setTo(teams.find((team) => team.id !== teamId)?.id ?? ""); setOpen(true); } function move() { moveTeamMember(from, to, member); setMoved(`${member}님을 ${teams.find((team) => team.id === to)?.name}으로 옮겼어요.`); setOpen(false); } return <div className="mx-auto max-w-[1120px] px-4 py-7 sm:px-6 lg:px-8"><header className="mb-6"><p className="text-sm text-slate-500">조 편성</p><h1 className="mt-1 text-2xl font-bold tracking-[-.03em]">행사 조와 구성원을 확인하세요</h1><p className="mt-2 text-sm text-slate-500">한 학생은 한 조에만 배정되어 있어요. 이동 전 대상 조를 확인할 수 있습니다.</p></header>{!canEdit && <div className="mb-5"><PermissionState title="조 편성 변경은 부장 이상 역할에서 할 수 있어요." description="현재 역할에서는 조 구성과 담당 업무만 확인할 수 있습니다."/></div>}{moved && <p className="mb-4 border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-[#17663d]">{moved}</p>}<div className="grid gap-4 lg:grid-cols-3">{teams.map((team) => <section key={team.id} className="border-t-2 border-slate-700 bg-white"><header className="border-b border-slate-200 p-4"><div className="flex items-start justify-between gap-2"><div><h2 className="font-bold text-slate-800">{team.name}</h2><p className="mt-1 text-sm leading-5 text-slate-500">{team.purpose}</p></div><span className="rounded bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">{team.members.length}명</span></div></header><div className="divide-y divide-slate-100">{team.members.map((name) => <div key={name} className="flex items-center justify-between gap-2 px-4 py-3"><div><p className="text-sm font-semibold text-slate-800">{name}{team.leader === name && <span className="ml-2 text-xs font-bold text-[#2563a8]">조장</span>}</p><p className="mt-0.5 text-xs text-slate-500">{team.leader === name ? "현장 안내 담당" : "조원"}</p></div>{canEdit && <button onClick={() => prepare(team.id, name)} className="rounded p-1.5 text-slate-500 hover:bg-slate-100" aria-label={`${name} 조 이동`}><ArrowRightLeft size={17}/></button>}</div>)}</div></section>)}</div><AppModal open={open} title="조 구성원 이동" description="이동하면 기존 조에서는 빠지고, 새 조의 인원 수에 바로 반영됩니다." onClose={() => setOpen(false)} footer={<><Button variant="secondary" onClick={() => setOpen(false)}>취소</Button><Button onClick={move}>이 조로 옮기기</Button></>}><div className="grid gap-5"><div className="border border-amber-200 bg-amber-50 p-3"><div className="flex gap-2"><ShieldAlert size={18} className="shrink-0 text-amber-700"/><p className="text-sm leading-6 text-amber-900">{member}님은 현재 <b>{fromTeam?.name}</b>에 있어요. 저장하면 한 조에만 남도록 자동으로 이동합니다.</p></div></div><SelectField label="옮길 조" value={to} onChange={(event) => setTo(event.target.value)}>{teams.filter((team) => team.id !== from).map((team) => <option key={team.id} value={team.id}>{team.name} · 현재 {team.members.length}명</option>)}</SelectField></div></AppModal></div>; }
+import { Link } from "@/components/MpaLink";
 
+function scheduleLabel(value?: string) {
+  if (!value) return "일정 미정";
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+export default function TeamsPage() {
+  const { teams, currentRole, currentUser, events } = useApp();
+  const seesAllManagedTeams = currentRole !== "MEMBER";
+  const myTeamCount = teams.filter(team => team.memberIds.includes(currentUser.id)).length;
+
+  return (
+    <div className="mx-auto max-w-[1120px] px-4 py-7 sm:px-6 lg:px-8">
+      <header className="mb-6">
+        <h1 className="text-2xl font-bold tracking-[-.03em]">조 편성</h1>
+        <p className="mt-1 text-sm text-slate-500">{seesAllManagedTeams ? "관리 중인 조와 참여 중인 조를 날짜별로 확인합니다." : "내가 참여하는 조와 역할을 확인합니다."}</p>
+        {teams.length > 0 && <div className="mt-4 flex gap-5 border-y border-slate-200 py-3 text-xs text-slate-600"><span>전체 <strong className="text-slate-900">{teams.length}개 조</strong></span><span>내 참여 <strong className="text-[#1f528b]">{myTeamCount}개 조</strong></span></div>}
+      </header>
+
+      {teams.length ? (
+        <section className="border-y border-slate-200">
+          {teams.map(team => {
+            const isMine = team.memberIds.includes(currentUser.id);
+            const event = events.find(item => item.id === team.eventId);
+            return (
+            <article key={team.id} className={`border-b border-slate-200 py-5 last:border-b-0 ${isMine ? "border-l-2 border-l-[#2563a8] pl-4" : ""}`}>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div><h2 className="text-base font-bold text-slate-900">{team.name}</h2>{event && <p className="mt-1 text-xs text-slate-500">{event.title} · {event.location}</p>}</div>
+                <div className="flex items-center gap-2"><p className="text-sm text-slate-500">{scheduleLabel(team.scheduleAt)}</p>{isMine && <span className="bg-[#e8f0f8] px-2 py-1 text-xs font-bold text-[#1f528b]">내 조</span>}</div>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                {team.roleDescription ?? team.purpose}
+              </p>
+              <p className="mt-3 flex items-center gap-2 text-sm text-slate-700"><Crown size={15} className="text-amber-600" /><b>조장 {team.leader}</b><span className="text-xs text-slate-500">총 {team.members.length}명</span></p>
+              <div className="mt-2 flex flex-wrap gap-1.5">{team.members.map(member => <span key={member} className="border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700">{member}</span>)}</div>
+              {team.taskId && seesAllManagedTeams && <Link href={`/tasks/${team.taskId}`} className="mt-4 inline-flex text-xs font-semibold text-[#1f528b] hover:underline">원본 조 편성 업무 보기</Link>}
+            </article>
+          );})}
+        </section>
+      ) : (
+        <div className="grid min-h-52 place-items-center border-y border-slate-200 px-5 py-10 text-center">
+          <div className="max-w-sm">
+            <UsersRound className="mx-auto text-slate-400" size={24} />
+            <h2 className="mt-3 text-sm font-bold text-slate-800">아직 저장된 조 편성이 없습니다.</h2>
+            <p className="mt-2 text-xs leading-5 text-slate-500">담당자가 조 편성 업무에서 결과를 저장하면 날짜별 운영표가 여기에 표시됩니다.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

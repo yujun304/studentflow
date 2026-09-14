@@ -1,8 +1,87 @@
-/** StudentFlow | 학기 운영 보드: 설명 없이 바로 체험 계정을 선택해 로그인한다 */
+/** StudentFlow | 교내 구성원이 바로 로그인하는 단순한 진입 화면 */
 import { useState } from "react";
-import { ArrowRight, LockKeyhole } from "lucide-react";
-import { useLocation } from "wouter";
+import { LockKeyhole } from "lucide-react";
 import { useApp } from "@/contexts/AppContext";
+import { nextDocumentPath } from "@/lib/document-path";
 import { Button, TextInput } from "@/components/primitives";
-const Logo = ({ compact = false }: { compact?: boolean }) => <span className={`grid place-items-center rounded-md bg-[#2563a8] font-bold text-white ${compact ? "h-9 w-9" : "h-10 w-10"}`}>S</span>;
-export default function LoginPage() { const { signIn } = useApp(); const [, setLocation] = useLocation(); const [email, setEmail] = useState("test"); const [password, setPassword] = useState("test"); const [error, setError] = useState(""); const [loading, setLoading] = useState(false); async function handleSubmit(event: React.FormEvent) { event.preventDefault(); if (!email.trim()) return setError("아이디 또는 이메일을 입력해 주세요."); if (!password) return setError("비밀번호를 입력해 주세요."); setError(""); setLoading(true); const ok = await signIn(email, password); setLoading(false); if (ok) setLocation("/"); else setError("아이디 또는 비밀번호가 올바르지 않습니다."); } return <div className="min-h-screen bg-[#f7f8fa] lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(420px,42%)]"><section className="relative hidden overflow-hidden bg-[#dfe9f3] lg:block"><div className="absolute inset-0 bg-[linear-gradient(145deg,#eaf0f6_0%,#d9e5f0_48%,#b9ccdf_100%)]"/><div className="absolute left-[12%] top-[16%] h-[58%] w-[72%] rotate-[-3deg] border border-white/80 bg-white/55 shadow-sm"/><div className="absolute left-[20%] top-[23%] h-px w-[48%] bg-slate-400/35"/><div className="absolute left-[20%] top-[29%] h-px w-[38%] bg-slate-400/25"/><div className="absolute inset-0 bg-gradient-to-t from-[#102a43]/90 via-[#102a43]/20 to-transparent"/><div className="absolute inset-x-0 bottom-0 p-12 text-white"><div className="mb-8 flex items-center gap-2"><Logo compact/><span className="font-bold">StudentFlow</span></div><h1 className="max-w-lg text-3xl font-bold leading-tight tracking-[-.03em]">오늘 해야 할 일부터,<br/>학생회 운영을 한곳에서.</h1><p className="mt-5 max-w-md text-sm leading-6 text-slate-100">공지, 행사, 업무와 출석 기록을 현재 역할에 맞춰 정리합니다.</p></div></section><main className="flex min-h-screen items-center justify-center p-5 sm:p-8"><div className="w-full max-w-[400px]"><div className="mb-8 flex items-center gap-2 lg:hidden"><Logo compact/><span className="text-lg font-bold">StudentFlow</span></div><div className="border border-slate-200 bg-white p-6 shadow-sm sm:p-8"><div className="mb-7"><p className="text-sm font-semibold text-[#2563a8]">학생회 운영 플랫폼</p><h1 className="mt-2 text-2xl font-bold tracking-[-.03em] text-slate-900">로그인</h1><p className="mt-2 text-sm leading-6 text-slate-500">학교에서 안내받은 계정으로 로그인하세요.</p></div><form className="grid gap-4" onSubmit={handleSubmit} noValidate><TextInput label="아이디 또는 이메일" value={email} onChange={(event) => setEmail(event.target.value)} error={error} autoComplete="username" required/><TextInput label="비밀번호" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required/><Button type="submit" size="lg" className="mt-2 w-full" disabled={loading}>{loading ? "로그인하는 중…" : "StudentFlow 들어가기"}<ArrowRight size={17}/></Button></form><div className="mt-6 border-t border-slate-200 pt-4"><p className="flex gap-2 text-xs leading-5 text-slate-500"><LockKeyhole size={15} className="mt-0.5 shrink-0"/>계정이 없다면 담당 선생님에게 문의하세요.</p></div></div></div></main></div>; }
+import ThemeToggle from "@/components/ThemeToggle";
+
+export default function LoginPage() {
+  const { signIn } = useApp();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!email.trim()) return setError("아이디 또는 이메일을 입력해 주세요.");
+    if (!password) return setError("비밀번호를 입력해 주세요.");
+    setError("");
+    setLoading(true);
+    const ok = await signIn(email, password);
+    setLoading(false);
+    if (ok) window.location.assign(nextDocumentPath());
+    else setError("아이디 또는 비밀번호가 올바르지 않습니다.");
+  }
+
+  return (
+    <div className="min-h-screen bg-white">
+      <header className="bg-white">
+        <div className="mx-auto flex h-16 max-w-[1040px] items-center justify-between px-5 sm:px-8">
+          <div>
+            <p className="text-base font-bold text-slate-900">StudentFlow</p>
+            <p className="text-[11px] text-slate-500">학생회 운영 시스템</p>
+          </div>
+          <ThemeToggle />
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-[1040px] px-5 py-16 sm:px-8 sm:py-24">
+        <div className="w-full max-w-[380px]">
+          <p className="mb-2 text-sm text-slate-500">2026학년도 2학기</p>
+          <h1 className="text-2xl font-bold text-slate-900">로그인</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            학교에서 안내받은 계정을 입력해 주세요.
+          </p>
+
+          <form
+            className="mt-9 grid gap-5"
+            onSubmit={handleSubmit}
+            noValidate
+          >
+            <TextInput
+              label="아이디 또는 이메일"
+              value={email}
+              onChange={event => setEmail(event.target.value)}
+              error={error}
+              autoComplete="username"
+              required
+            />
+            <TextInput
+              label="비밀번호"
+              type="password"
+              value={password}
+              onChange={event => setPassword(event.target.value)}
+              autoComplete="current-password"
+              required
+            />
+            <Button
+              type="submit"
+              size="lg"
+              className="mt-2 w-full"
+              disabled={loading}
+            >
+              {loading ? "로그인하는 중…" : "로그인"}
+            </Button>
+          </form>
+
+          <p className="mt-8 flex gap-2 text-xs leading-5 text-slate-500">
+            <LockKeyhole size={15} className="mt-0.5 shrink-0" />
+            계정 문의는 담당 선생님에게 해주세요.
+          </p>
+        </div>
+      </main>
+    </div>
+  );
+}

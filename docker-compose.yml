@@ -5,8 +5,6 @@ services:
       POSTGRES_DB: studentflow
       POSTGRES_USER: studentflow
       POSTGRES_PASSWORD: studentflow
-    ports:
-      - "5432:5432"
     volumes:
       - studentflow_postgres:/var/lib/postgresql/data
     healthcheck:
@@ -20,16 +18,25 @@ services:
     env_file:
       - path: .env
         required: false
+      - path: ./backend/.env
+        required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://studentflow:studentflow@postgres:5432/studentflow
       FRONTEND_ORIGIN: ${COMPOSE_FRONTEND_ORIGIN:-http://localhost:8081}
       JWT_SECRET: ${JWT_SECRET:-development-secret-change-before-production-1234}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SECURE: ${COMPOSE_COOKIE_SECURE:-false}
+      PROPOSAL_AI_ENABLED: "true"
+      PROPOSAL_TRANSCRIPTION_PROVIDER: ${PROPOSAL_TRANSCRIPTION_PROVIDER:-local}
+      PROPOSAL_LOCAL_WHISPER_MODEL: ${PROPOSAL_LOCAL_WHISPER_MODEL:-small}
+      PROPOSAL_LOCAL_WHISPER_CACHE_DIR: /data/whisper-models
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-104857600}
+      PROPOSAL_AUDIO_MAX_BYTES: ${PROPOSAL_AUDIO_MAX_BYTES:-104857600}
       STORAGE_ROOT: /data/uploads
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-/run/secrets/studentflow-vapid/private_key.pem}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:studentflow@localhost}
     volumes:
       - studentflow_uploads:/data/uploads
+      - studentflow_whisper_models:/data/whisper-models
       - ./.data/vapid:/run/secrets/studentflow-vapid:ro
     depends_on:
       postgres:
@@ -45,3 +52,4 @@ services:
 volumes:
   studentflow_postgres:
   studentflow_uploads:
+  studentflow_whisper_models:

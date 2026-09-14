@@ -53,7 +53,22 @@ npm run dev
 
 브라우저에서 `http://localhost:5173`으로 접속합니다. 운영 환경에서는 프론트와 API를 동일한 HTTPS 사이트의 리버스 프록시 뒤에 배치하는 구성을 권장합니다.
 
-전체 로컬 서버 구성은 `.env`를 준비한 뒤 `docker compose up -d --build`로 실행하며 기본 주소는 `http://localhost:8081`입니다. 포트를 바꾸려면 `COMPOSE_FRONTEND_PORT`와 `COMPOSE_FRONTEND_ORIGIN`을 같은 주소로 설정합니다. 외부에 공개할 때는 앞단 리버스 프록시에 TLS 인증서를 설정하고 `COOKIE_SECURE=true`로 변경합니다. PostgreSQL과 업로드 파일은 각각 영구 Docker 볼륨에 보관합니다.
+전체 로컬 서버 구성은 `.env`를 준비한 뒤 `docker compose up -d --build`로 실행하며 기본 주소는 `http://localhost:8081`입니다. 포트를 바꾸려면 `COMPOSE_FRONTEND_PORT`와 `COMPOSE_FRONTEND_ORIGIN`을 같은 주소로 설정합니다. 외부에 공개할 때는 앞단 리버스 프록시에 TLS 인증서를 설정하고 `COMPOSE_COOKIE_SECURE=true`로 변경합니다. PostgreSQL과 업로드 파일은 각각 영구 Docker 볼륨에 보관합니다.
+
+### 기능 검사 예시 데이터
+
+개발 환경에서 실제 튜토리얼과 삭제 기능을 검사하려면 실행 중인 backend에 예시 데이터를 보강합니다. 같은 명령을 다시 실행해도 동일한 제목과 계정을 중복 생성하지 않으며, 기존 데이터는 삭제하지 않습니다.
+
+```powershell
+docker compose exec -T backend uv run --no-sync python -m app.bootstrap --demo
+```
+
+- 로그인: `demo-teacher@studentflow.example.com`
+- 비밀번호: `studentflow-demo`
+- 전체 흐름: 메뉴의 `체험 안내`에서 제안 → 교사 승인 → 조 편성 → 포스터 제출 순서로 검사
+- 삭제 검사: `[삭제 기능 검사] 독립 업무`, `[삭제 기능 검사] 독립 행사`, `[삭제 기능 검사] 독립 공지`
+
+제출물이나 조 편성 결과가 연결된 업무는 기록 보호를 위해 삭제되지 않습니다. 삭제 전용 예시는 의존 기록이 없는 상태로 생성됩니다.
 
 ## Docker가 쓰이는 곳
 
@@ -86,10 +101,20 @@ React 상태 관리, FastAPI 권한 검사, 업무·공지·출석 규칙은 일
 - `COOKIE_SECURE`: HTTPS 운영 환경에서는 `true`
 - `FRONTEND_ORIGIN`: 허용할 정확한 프론트엔드 Origin
 - `COMPOSE_FRONTEND_ORIGIN`, `COMPOSE_FRONTEND_PORT`: Docker Compose 프론트엔드 Origin과 호스트 포트
+- `COMPOSE_COOKIE_SECURE`: Compose의 HTTPS 쿠키 여부. localhost는 `false`, HTTPS 배포는 `true`
 - `STORAGE_ROOT`: 웹 루트 밖의 업로드 저장 경로
 - `STORAGE_BACKEND`: 현재는 `local`, 후속 S3 구현을 위한 설정 계약은 예약됨
 - `MAX_UPLOAD_BYTES`: 업로드 최대 바이트
 - `DEFAULT_TIMEZONE`: 기본 `Asia/Seoul`
+- `PROPOSAL_AI_ENABLED`: `true`일 때 회의 녹음 자동 처리를 활성화
+- `PROPOSAL_AI_API_KEY`: 서버에서만 사용하는 OpenAI API 키. 프론트엔드에는 전달하지 않음
+- `PROPOSAL_TRANSCRIPTION_MODEL`, `PROPOSAL_TRANSCRIPTION_LANGUAGE`: 음성 전사 모델(기본 `whisper-1`)과 언어
+- `PROPOSAL_AI_MODEL`: 회의 녹취를 기존 계획서 JSON 구조로 정리할 모델
+- `PROPOSAL_AI_TIMEOUT_SECONDS`, `PROPOSAL_TRANSCRIPT_MAX_CHARS`: 외부 API 제한 시간과 처리할 최대 녹취 길이
+
+회의 녹음 자동 처리는 서버가 업로드 파일을 Whisper 전사 API로 보내고, 전사문과 기존 간이
+기획서를 LLM의 엄격한 JSON 스키마 출력으로 정리한 다음 기존 행사 계획서 필드에 채웁니다.
+자동 처리를 사용하지 않거나 API 설정이 없을 때도 기존 수동 녹취·회의 정리 흐름은 유지됩니다.
 
 ## 보안 구조
 
@@ -108,6 +133,6 @@ npm run build
 
 ## 후속 범위
 
-조 편성·통합 달력, 출석 체크리스트, 회의록, 결정 카드, 행사 운영표, 학교 지도 위치 배정과 기수 인수인계 API는 동작합니다. 댓글, 일부 개인 메모·리마인더와 감사 로그 중 아직 준비되지 않은 API는 인증과 기본 권한을 확인한 뒤 `501 feature_not_ready`를 반환합니다. 프로젝트 범위를 단순화하기 위해 채팅 기능은 제거했습니다.
+조 편성·통합 달력, 출석 체크리스트, 회의록, 빠른 메모, 결정 카드, 행사 운영표, 학교 지도 위치 배정과 기수 인수인계 API는 동작합니다. 빠른 메모는 대시보드에서 사용자별로 작성·조회·삭제할 수 있습니다. 댓글 Thread, 저장 항목과 감사 로그 조회 등 아직 준비되지 않은 API는 인증과 기본 권한을 확인한 뒤 `501 feature_not_ready`를 반환합니다. 프로젝트 범위를 단순화하기 위해 채팅 기능은 제거했습니다.
 
 PWA manifest와 서비스 워커 등록은 제공하지만 오프라인 저장은 하지 않습니다. IndexedDB와 Background Sync도 사용하지 않습니다. 실제 푸시 발송과 S3 저장소 구현은 다음 단계로 남겨두었습니다.

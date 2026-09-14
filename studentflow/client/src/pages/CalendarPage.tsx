@@ -3,16 +3,15 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  ClipboardCheck,
   List,
-  Megaphone,
 } from "lucide-react";
-import { useMemo, useState } from "react";
-import { Link } from "wouter";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "@/components/MpaLink";
 import { useApp } from "@/contexts/AppContext";
 import { EmptyState, StatusBadge } from "@/components/primitives";
+import { api } from "@/lib/api";
 
-type CalendarType = "행사" | "업무" | "공지";
+type CalendarType = "업무" | "조 일정" | "부장회의" | "공지";
 type Filter = "전체" | CalendarType;
 type CalendarItem = {
   id: string;
@@ -22,15 +21,24 @@ type CalendarItem = {
   meta: string;
   href: string;
 };
+type ApiCalendarItem = {
+  id: string;
+  source: string;
+  title: string;
+  description: string | null;
+  starts_at: string;
+};
 
 const tone = {
-  행사: "bg-[#e8f0f8] text-[#1f528b]",
   업무: "bg-amber-50 text-[#895d09]",
+  "조 일정": "bg-emerald-50 text-[#17663d]",
+  부장회의: "bg-violet-50 text-violet-700",
   공지: "bg-slate-100 text-slate-700",
 };
 const typeStatus = {
-  행사: "예정",
   업무: "해야 할 일",
+  "조 일정": "참여 일정",
+  부장회의: "회의 일정",
   공지: "모집 중",
 } as const;
 const weekday = ["일", "월", "화", "수", "목", "금", "토"];
@@ -61,7 +69,7 @@ function itemForDay(items: CalendarItem[], key: string, filter: Filter) {
 }
 
 export default function CalendarPage() {
-  const { events, tasks, announcements } = useApp();
+  const { currentUser, tasks, announcements, teams } = useApp();
   const [filter, setFilter] = useState<Filter>("전체");
   const [monthOffset, setMonthOffset] = useState(0);
   const [selectedKey, setSelectedKey] = useState(() => dateKey(new Date()));
@@ -73,16 +81,39 @@ export default function CalendarPage() {
     return new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
   }, [monthOffset]);
   const days = useMemo(() => calendarDays(currentMonth), [currentMonth]);
+  const [communityMeetings, setCommunityMeetings] = useState<CalendarItem[]>([]);
+  useEffect(() => {
+    const start = dateKey(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1));
+    const end = dateKey(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0));
+    let cancelled = false;
+    api<ApiCalendarItem[]>(`/calendar?start=${start}&end=${end}`, { cache: "no-store" })
+      .then(calendarItems => {
+        if (cancelled) return;
+        setCommunityMeetings(
+          calendarItems
+            .filter(item => item.source === "COMMUNITY_MEETING")
+            .map(item => {
+              const startsAt = new Date(item.starts_at);
+              return {
+                id: item.id,
+                type: "부장회의" as const,
+                dateKey: dateKey(startsAt),
+                title: item.title,
+                meta: item.description ?? "회의 시간 미정",
+                href: "/community",
+              };
+            })
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setCommunityMeetings([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentMonth, currentUser.id]);
   const items = useMemo<CalendarItem[]>(
     () => [
-      ...events.map(event => ({
-        id: event.id,
-        type: "행사" as const,
-        dateKey: event.dateKey ?? dateKey(new Date()),
-        title: event.title,
-        meta: `${event.time} · ${event.location}`,
-        href: `/events/${event.id}`,
-      })),
       ...tasks
         .filter(task => task.status !== "DONE")
         .map(task => ({
@@ -93,6 +124,19 @@ export default function CalendarPage() {
           meta: `마감 ${task.dueDate.slice(11)} · ${task.department}`,
           href: `/tasks/${task.id}`,
         })),
+      ...teams
+        .filter(team => team.scheduleAt)
+        .map(team => {
+          const schedule = new Date(team.scheduleAt as string);
+          return {
+            id: `team-${team.id}`,
+            type: "조 일정" as const,
+            dateKey: dateKey(schedule),
+            title: team.name,
+            meta: `${schedule.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} · ${team.roleDescription ?? team.purpose}`,
+            href: "/teams",
+          };
+        }),
       ...announcements
         .filter(announcement => announcement.application || announcement.pinned)
         .map(announcement => ({
@@ -105,8 +149,9 @@ export default function CalendarPage() {
             : `${announcement.target} 대상`,
           href: `/announcements/${announcement.id}`,
         })),
+      ...communityMeetings,
     ],
-    [events, tasks, announcements]
+    [tasks, announcements, teams, communityMeetings]
   );
   const currentItems = itemForDay(items, selectedKey, filter);
   const monthItems = items.filter(
@@ -130,13 +175,7 @@ export default function CalendarPage() {
     <div className="mx-auto max-w-[1240px] px-4 py-7 sm:px-6 lg:px-8">
       <header className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
-          <p className="text-sm text-slate-500">캘린더</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-[-.03em]">
-            일정을 한눈에 확인하세요
-          </h1>
-          <p className="mt-2 text-sm text-slate-500">
-            행사, 업무 마감, 공지를 날짜별로 함께 확인할 수 있어요.
-          </p>
+          <h1 className="text-2xl font-bold tracking-[-.03em]">캘린더</h1>
         </div>
         <div className="flex items-center gap-1 self-start border border-slate-200 bg-white p-1">
           <button
@@ -176,7 +215,7 @@ export default function CalendarPage() {
           </button>
         </div>
         <div className="flex flex-wrap gap-1">
-          {(["전체", "행사", "업무", "공지"] as const).map(item => (
+          {(["전체", "업무", "조 일정", "부장회의", "공지"] as const).map(item => (
             <button
               key={item}
               onClick={() => setFilter(item)}
@@ -230,7 +269,15 @@ export default function CalendarPage() {
                           {dayItems.slice(0, 3).map(item => (
                             <i
                               key={item.id}
-                              className={`h-1.5 w-1.5 rounded-full ${item.type === "행사" ? "bg-[#2563a8]" : item.type === "업무" ? "bg-amber-500" : "bg-slate-500"}`}
+                              className={`h-1.5 w-1.5 rounded-full ${
+                                item.type === "업무"
+                                  ? "bg-amber-500"
+                                  : item.type === "조 일정"
+                                    ? "bg-emerald-600"
+                                    : item.type === "부장회의"
+                                      ? "bg-violet-600"
+                                    : "bg-slate-500"
+                              }`}
                             />
                           ))}
                         </span>
@@ -323,29 +370,6 @@ export default function CalendarPage() {
           </div>
         </section>
       )}
-      <div className="mt-6 grid gap-3 sm:grid-cols-3">
-        <div className="border-l-2 border-[#2563a8] bg-white p-4">
-          <CalendarDays size={18} className="text-[#2563a8]" />
-          <p className="mt-3 text-sm font-bold">행사 일정</p>
-          <p className="mt-1 text-xs leading-5 text-slate-500">
-            장소와 참여 시간을 날짜 셀에서 확인합니다.
-          </p>
-        </div>
-        <div className="border-l-2 border-amber-500 bg-white p-4">
-          <ClipboardCheck size={18} className="text-amber-700" />
-          <p className="mt-3 text-sm font-bold">업무 마감</p>
-          <p className="mt-1 text-xs leading-5 text-slate-500">
-            마감이 임박한 업무는 왼쪽 상태선으로 구분합니다.
-          </p>
-        </div>
-        <div className="border-l-2 border-slate-500 bg-white p-4">
-          <Megaphone size={18} className="text-slate-600" />
-          <p className="mt-3 text-sm font-bold">공지 일정</p>
-          <p className="mt-1 text-xs leading-5 text-slate-500">
-            신청 마감과 중요한 공지를 함께 확인합니다.
-          </p>
-        </div>
-      </div>
     </div>
   );
 }

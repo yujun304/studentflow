@@ -12,6 +12,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     Time,
@@ -182,6 +183,12 @@ class Task(UUIDMixin, TimeMixin, Base):
         Enum(TaskStatus, name="task_status"), default=TaskStatus.TODO
     )
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    operation_days: Mapped[int | None] = mapped_column(Integer)
+    teams_per_day: Mapped[int | None] = mapped_column(Integer)
+    people_per_team: Mapped[int | None] = mapped_column(Integer)
+    team_role_description: Mapped[str | None] = mapped_column(String(500))
+    team_requirements: Mapped[list[dict] | None] = mapped_column(JSON)
+    operation_dates: Mapped[list[str] | None] = mapped_column(JSON)
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
 
 
@@ -353,7 +360,209 @@ class Comment(UUIDMixin, TimeMixin, Base):
     author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     parent_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("comments.id"))
     content: Mapped[str] = mapped_column(Text)
+    is_anonymous: Mapped[bool] = mapped_column(Boolean, default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CommunityPost(UUIDMixin, TimeMixin, Base):
+    __tablename__ = "community_posts"
+    term_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("terms.id"), index=True)
+    author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    content: Mapped[str] = mapped_column(Text)
+    is_anonymous: Mapped[bool] = mapped_column(Boolean, default=False)
+    test_recommendation_bonus: Mapped[int] = mapped_column(Integer, default=0)
+    agenda_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    plan_writer_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"), index=True
+    )
+    meeting_date: Mapped[date | None] = mapped_column(Date)
+    meeting_time_slot: Mapped[str | None] = mapped_column(String(20))
+    meeting_time: Mapped[time | None] = mapped_column(Time)
+    converted_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("events.id", ondelete="SET NULL"), unique=True
+    )
+    converted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    converted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    proposal_status: Mapped[str] = mapped_column(
+        String(24), default="DISCUSSING", server_default="DISCUSSING", index=True
+    )
+    proposal_topic: Mapped[str | None] = mapped_column(String(160))
+    current_proposal_version: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1"
+    )
+    proposal_feedback_required_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+
+
+class ProposalVersion(UUIDMixin, Base):
+    __tablename__ = "proposal_versions"
+    __table_args__ = (UniqueConstraint("post_id", "version_number"),)
+    post_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("community_posts.id", ondelete="CASCADE"), index=True
+    )
+    version_number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text)
+    topic: Mapped[str | None] = mapped_column(String(160))
+    change_summary: Mapped[str | None] = mapped_column(String(500))
+    author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProposalFeedback(UUIDMixin, TimeMixin, Base):
+    __tablename__ = "proposal_feedback"
+    __table_args__ = (
+        UniqueConstraint("post_id", "author_id", "idempotency_key"),
+    )
+    post_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("community_posts.id", ondelete="CASCADE"), index=True
+    )
+    proposal_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("proposal_versions.id", ondelete="CASCADE"), index=True
+    )
+    author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    category: Mapped[str] = mapped_column(String(24), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    idempotency_key: Mapped[str | None] = mapped_column(String(100))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class ProposalSummary(UUIDMixin, Base):
+    __tablename__ = "proposal_summaries"
+    proposal_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("proposal_versions.id", ondelete="CASCADE"), unique=True
+    )
+    strengths: Mapped[list[str]] = mapped_column(JSON, default=list)
+    concerns: Mapped[list[str]] = mapped_column(JSON, default=list)
+    changes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    new_ideas: Mapped[list[str]] = mapped_column(JSON, default=list)
+    open_questions: Mapped[list[str]] = mapped_column(JSON, default=list)
+    source_feedback_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider: Mapped[str] = mapped_column(String(24), default="fallback")
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProposalAttachment(UUIDMixin, Base):
+    __tablename__ = "proposal_attachments"
+    proposal_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("proposal_versions.id", ondelete="CASCADE"), index=True
+    )
+    original_name: Mapped[str] = mapped_column(String(255))
+    storage_key: Mapped[str] = mapped_column(String(255), unique=True)
+    mime_type: Mapped[str] = mapped_column(String(150))
+    size: Mapped[int] = mapped_column(BigInteger)
+    purpose: Mapped[str] = mapped_column(String(32), default="GENERAL", server_default="GENERAL")
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CommunityEventPlan(UUIDMixin, TimeMixin, Base):
+    __tablename__ = "community_event_plans"
+    post_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("community_posts.id", ondelete="CASCADE"), unique=True
+    )
+    author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    purpose: Mapped[str | None] = mapped_column(Text)
+    target_participants: Mapped[str | None] = mapped_column(Text)
+    schedule_plan: Mapped[str | None] = mapped_column(Text)
+    location_plan: Mapped[str | None] = mapped_column(Text)
+    program_plan: Mapped[str | None] = mapped_column(Text)
+    role_plan: Mapped[str | None] = mapped_column(Text)
+    budget_plan: Mapped[str | None] = mapped_column(Text)
+    safety_plan: Mapped[str | None] = mapped_column(Text)
+    operation_days: Mapped[int | None] = mapped_column(Integer)
+    teams_per_day: Mapped[int | None] = mapped_column(Integer)
+    people_per_team: Mapped[int | None] = mapped_column(Integer)
+    team_role_description: Mapped[str | None] = mapped_column(String(500))
+    team_requirements: Mapped[list[dict] | None] = mapped_column(JSON)
+    operation_dates: Mapped[list[str] | None] = mapped_column(JSON)
+    team_manager_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"), index=True
+    )
+    poster_manager_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"), index=True
+    )
+    poster_required: Mapped[bool] = mapped_column(Boolean, default=True)
+    team_task_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tasks.id"))
+    poster_task_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tasks.id"))
+    status: Mapped[str] = mapped_column(String(24), default="DRAFT", index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submitted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    review_note: Mapped[str | None] = mapped_column(Text)
+    brief_plan: Mapped[dict | None] = mapped_column(JSON)
+    meeting_attachment_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("proposal_attachments.id", ondelete="SET NULL")
+    )
+    meeting_notes: Mapped[dict | None] = mapped_column(JSON)
+    meeting_transcript: Mapped[str | None] = mapped_column(Text)
+    final_plan: Mapped[dict | None] = mapped_column(JSON)
+    ai_provider: Mapped[str | None] = mapped_column(String(24))
+    transcription_provider: Mapped[str | None] = mapped_column(String(24))
+
+
+class CommunityPlanRevision(UUIDMixin, Base):
+    __tablename__ = "community_plan_revisions"
+    __table_args__ = (UniqueConstraint("plan_id", "version"),)
+    plan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("community_event_plans.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    editor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CommunityPlanSuggestion(UUIDMixin, TimeMixin, Base):
+    __tablename__ = "community_plan_suggestions"
+    plan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("community_event_plans.id", ondelete="CASCADE"), index=True
+    )
+    author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    section: Mapped[str] = mapped_column(String(40))
+    proposed_content: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="OPEN", index=True)
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CommunityRecommendation(UUIDMixin, Base):
+    __tablename__ = "community_recommendations"
+    __table_args__ = (UniqueConstraint("post_id", "user_id"),)
+    post_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("community_posts.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CommunityPollOption(UUIDMixin, Base):
+    __tablename__ = "community_poll_options"
+    __table_args__ = (UniqueConstraint("post_id", "position"),)
+    post_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("community_posts.id", ondelete="CASCADE"), index=True
+    )
+    label: Mapped[str] = mapped_column(String(120))
+    position: Mapped[int] = mapped_column(Integer)
+
+
+class CommunityPollVote(UUIDMixin, Base):
+    __tablename__ = "community_poll_votes"
+    __table_args__ = (UniqueConstraint("post_id", "user_id"),)
+    post_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("community_posts.id", ondelete="CASCADE"), index=True
+    )
+    option_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("community_poll_options.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class QuickMemo(UUIDMixin, TimeMixin, Base):
@@ -474,6 +683,8 @@ class SchoolMap(UUIDMixin, TimeMixin, Base):
         ForeignKey("events.id", ondelete="CASCADE"), index=True
     )
     title: Mapped[str] = mapped_column(String(200))
+    floor_label: Mapped[str] = mapped_column(String(80), default="1층")
+    floor_order: Mapped[int] = mapped_column(Integer, default=0)
     file_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("files.id"), unique=True)
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
 
@@ -495,3 +706,26 @@ class MapAssignment(UUIDMixin, TimeMixin, Base):
     starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+
+
+class EventCompletionRecord(UUIDMixin, TimeMixin, Base):
+    __tablename__ = "event_completion_records"
+    __table_args__ = (
+        CheckConstraint(
+            "attendee_count IS NULL OR attendee_count >= 0",
+            name="ck_event_completion_attendee_count",
+        ),
+    )
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    summary: Mapped[str] = mapped_column(Text)
+    outcomes: Mapped[str | None] = mapped_column(Text)
+    incidents: Mapped[str | None] = mapped_column(Text)
+    recommendations: Mapped[str | None] = mapped_column(Text)
+    attendee_count: Mapped[int | None] = mapped_column(Integer)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    handover_guide_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("handover_guides.id", ondelete="SET NULL"), unique=True
+    )

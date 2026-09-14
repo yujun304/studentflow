@@ -2,7 +2,6 @@
 import {
   AlertCircle,
   CheckCircle2,
-  FileWarning,
   LoaderCircle,
   X,
 } from "lucide-react";
@@ -36,7 +35,7 @@ export function Button({
     ghost: "text-slate-600 hover:bg-slate-100 focus-visible:ring-[#2563a8]",
   };
   const sizes = {
-    sm: "h-10 px-3 text-xs sm:h-8",
+    sm: "h-11 px-3 text-xs sm:h-8",
     md: "h-11 px-4 text-sm sm:h-10",
     lg: "h-12 px-5 text-sm sm:h-11",
   };
@@ -75,7 +74,7 @@ export function TextInput({
       )}
       <input
         className={join(
-          "h-11 rounded-md border bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-[#2563a8] focus:ring-2 focus:ring-[#2563a8]/15 sm:h-10",
+          "h-11 rounded-md border bg-white px-3 text-sm text-slate-900 outline-none transition-[border-color,box-shadow,background-color] duration-150 ease-[cubic-bezier(.23,1,.32,1)] focus-visible:border-[#2563a8] focus-visible:ring-2 focus-visible:ring-[#2563a8]/15 sm:h-10",
           error ? "border-[#b42318]" : "border-slate-300"
         )}
         {...props}
@@ -109,7 +108,7 @@ export function SelectField({
       )}
       <select
         className={join(
-          "h-11 rounded-md border bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-[#2563a8] focus:ring-2 focus:ring-[#2563a8]/15 sm:h-10",
+          "h-11 rounded-md border bg-white px-3 text-sm text-slate-900 outline-none transition-[border-color,box-shadow,background-color] duration-150 ease-[cubic-bezier(.23,1,.32,1)] focus-visible:border-[#2563a8] focus-visible:ring-2 focus-visible:ring-[#2563a8]/15 sm:h-10",
           error ? "border-[#b42318]" : "border-slate-300"
         )}
         {...props}
@@ -141,7 +140,7 @@ export function TextArea({
       )}
       <textarea
         className={join(
-          "min-h-24 rounded-md border bg-white px-3 py-2.5 text-sm leading-6 text-slate-900 outline-none transition focus:border-[#2563a8] focus:ring-2 focus:ring-[#2563a8]/15",
+          "min-h-24 rounded-md border bg-white px-3 py-2.5 text-sm leading-6 text-slate-900 outline-none transition-[border-color,box-shadow,background-color] duration-150 ease-[cubic-bezier(.23,1,.32,1)] focus-visible:border-[#2563a8] focus-visible:ring-2 focus-visible:ring-[#2563a8]/15",
           error ? "border-[#b42318]" : "border-slate-300"
         )}
         {...props}
@@ -159,16 +158,10 @@ const badgeStyles: Record<string, string> = {
   "해야 할 일": "bg-slate-100 text-slate-700",
   IN_PROGRESS: "bg-blue-50 text-[#1f528b]",
   "진행 중": "bg-blue-50 text-[#1f528b]",
-  IN_REVIEW: "bg-amber-50 text-[#895d09]",
-  "검토 중": "bg-amber-50 text-[#895d09]",
   DONE: "bg-emerald-50 text-[#17663d]",
   완료: "bg-emerald-50 text-[#17663d]",
   APPROVED: "bg-emerald-50 text-[#17663d]",
-  승인: "bg-emerald-50 text-[#17663d]",
-  REJECTED: "bg-rose-50 text-[#a12622]",
-  반려: "bg-rose-50 text-[#a12622]",
   PENDING: "bg-amber-50 text-[#895d09]",
-  "검토 대기": "bg-amber-50 text-[#895d09]",
   DRAFT: "bg-slate-100 text-slate-700",
   초안: "bg-slate-100 text-slate-700",
   "모집 중": "bg-blue-50 text-[#1f528b]",
@@ -228,6 +221,7 @@ export function AppModal({
   onClose,
   children,
   footer,
+  size = "md",
 }: {
   open: boolean;
   title: string;
@@ -235,6 +229,7 @@ export function AppModal({
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  size?: "md" | "xl";
 }) {
   useEffect(() => {
     if (!open) return;
@@ -255,7 +250,10 @@ export function AppModal({
       onMouseDown={onClose}
     >
       <section
-        className="flex max-h-[92dvh] w-full max-w-lg flex-col rounded-t-xl bg-white shadow-2xl sm:max-h-[86vh] sm:rounded-xl"
+        className={join(
+          "flex max-h-[92dvh] w-full flex-col rounded-t-xl bg-white shadow-2xl sm:max-h-[86vh] sm:rounded-xl",
+          size === "xl" ? "max-w-5xl" : "max-w-lg"
+        )}
         role="dialog"
         aria-modal="true"
         aria-labelledby="dialog-title"
@@ -278,7 +276,7 @@ export function AppModal({
           <button
             aria-label="창 닫기"
             onClick={onClose}
-            className="-mr-2 grid h-10 w-10 shrink-0 place-items-center rounded text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            className="-mr-2 grid h-11 w-11 shrink-0 place-items-center rounded text-slate-500 hover:bg-slate-100 hover:text-slate-700 sm:h-10 sm:w-10"
           >
             <X size={20} />
           </button>
@@ -305,13 +303,8 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="grid min-h-52 place-items-center border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
+    <div className="grid min-h-44 place-items-center border-y border-slate-200 px-5 py-10 text-center">
       <div className="max-w-sm">
-        <FileWarning
-          aria-hidden="true"
-          className="mx-auto mb-3 text-slate-400"
-          size={34}
-        />
         <h3 className="text-sm font-bold text-slate-800">{title}</h3>
         <p className="mt-1.5 text-sm leading-6 text-slate-500">{description}</p>
         {action && <div className="mt-4">{action}</div>}
@@ -368,9 +361,8 @@ export function PermissionState({
   description?: string;
 }) {
   return (
-    <div className="grid min-h-52 place-items-center border border-slate-200 bg-slate-50 px-5 py-10 text-center">
+    <div className="grid min-h-44 place-items-center border-y border-slate-200 px-5 py-10 text-center">
       <div className="max-w-md">
-        <FileWarning className="mx-auto mb-3 text-slate-500" size={24} />
         <h3 className="text-sm font-bold text-slate-800">{title}</h3>
         <p className="mt-1.5 text-sm leading-6 text-slate-500">{description}</p>
       </div>

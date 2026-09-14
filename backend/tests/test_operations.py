@@ -10,10 +10,15 @@ from app.api.operations import (
     create_handover,
     create_map_assignment,
     create_run_item,
+    list_completion_records,
     list_decisions,
     list_handovers,
     list_map_assignments,
+    list_run_items,
+    reorder_run_items,
+    save_event_completion,
     update_decision_status,
+    update_map_assignment_position,
     update_run_item_status,
 )
 from app.core.database import Base
@@ -37,9 +42,12 @@ from app.schemas import (
     DecisionCardIn,
     DecisionCardStatusIn,
     EventRunItemIn,
+    EventRunItemsReorderIn,
     EventRunItemStatusIn,
+    EventCompletionRecordIn,
     HandoverGuideIn,
     MapAssignmentIn,
+    MapAssignmentPositionIn,
 )
 
 
@@ -156,6 +164,28 @@ async def test_operations_flow_links_decision_task_handover_runbook_and_map_assi
             db,
         )
         assert active.status == RunItemStatus.IN_PROGRESS
+        second_run_item = await create_run_item(
+            event.id,
+            EventRunItemIn(
+                title="무대 시작",
+                planned_at=datetime(2026, 10, 10, 1, tzinfo=UTC),
+                location_label="운동장",
+                assignee_id=student.id,
+            ),
+            teacher,
+            db,
+        )
+        reordered = await reorder_run_items(
+            event.id,
+            EventRunItemsReorderIn(item_ids=[second_run_item.id, run_item.id]),
+            teacher,
+            db,
+        )
+        assert [item.id for item in reordered] == [second_run_item.id, run_item.id]
+        assert [item.id for item in await list_run_items(event.id, teacher, db)] == [
+            second_run_item.id,
+            run_item.id,
+        ]
 
         stored = StoredFile(
             original_name="map.png",
@@ -191,8 +221,36 @@ async def test_operations_flow_links_decision_task_handover_runbook_and_map_assi
         visible = await list_map_assignments(school_map.id, student, db)
         assert len(visible) == 1
         assert visible[0].activity == "방문객 동선 안내"
+        moved = await update_map_assignment_position(
+            assignment.id,
+            MapAssignmentPositionIn(x_ratio=0.6, y_ratio=0.4),
+            teacher,
+            db,
+        )
+        assert moved.x_ratio == 0.6
+        assert moved.y_ratio == 0.4
         assert await db.scalar(
             select(MapAssignment.id).where(MapAssignment.id == assignment.id)
         ) == assignment.id
+
+        completion = await save_event_completion(
+            event.id,
+            EventCompletionRecordIn(
+                summary="축제를 안전하게 마무리했다.",
+                outcomes="학생 안내 동선이 원활했다.",
+                incidents="우천으로 일부 일정이 지연됐다.",
+                recommendations="우천 동선을 사전에 공지한다.",
+                attendee_count=320,
+                completed_at=datetime(2026, 10, 10, 8, tzinfo=UTC),
+                create_handover_draft=True,
+            ),
+            teacher,
+            db,
+        )
+        assert completion.handover_guide_id is not None
+        assert completion.event_title == "학교 축제"
+        assert (await db.get(Event, event.id)).status == "COMPLETED"
+        records = await list_completion_records(student, db)
+        assert [record.id for record in records] == [completion.id]
 
     await engine.dispose()

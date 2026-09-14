@@ -177,6 +177,22 @@ async def update_notice(
     return notice_out(notice, actor, recipient_ids)
 
 
+@router.delete("/notices/{notice_id}", status_code=204)
+async def delete_notice(
+    notice_id: uuid.UUID,
+    actor: User = Depends(manager),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    notice = await db.get(Notice, notice_id)
+    if not notice or notice.term_id != actor.term_id:
+        raise AppError(404, "notice_not_found", "공지를 찾을 수 없습니다.")
+    if not can_edit_notice(notice, actor):
+        raise AppError(403, "notice_delete_forbidden", "직접 등록한 공지만 삭제할 수 있습니다.")
+    await db.execute(delete(NoticeApplication).where(NoticeApplication.notice_id == notice.id))
+    await db.delete(notice)
+    await db.commit()
+
+
 @router.post("/notices/{notice_id}/read", status_code=204)
 async def mark_read(
     notice_id: uuid.UUID, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)

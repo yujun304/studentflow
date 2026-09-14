@@ -14,11 +14,21 @@ def test_password_is_hashed_and_verifiable():
 
 
 def test_portfolio_login_ids_map_to_internal_emails():
+    assert login_email("jo") == "jo@example.com"
+    assert login_email(" JO ") == "jo@example.com"
+    assert login_email("student") == "student@example.com"
+    assert login_email(" STUDENT ") == "student@example.com"
     assert login_email("test") == "test@example.com"
     assert login_email(" TEST ") == "test@example.com"
     assert login_email("student1") == "student01@example.com"
     assert login_email(" STUDENT1 ") == "student01@example.com"
     assert login_email("teacher@example.com") == "teacher@example.com"
+
+
+def test_student_number_maps_to_internal_email():
+    assert login_email("30317") == "30317@studentflow.example.com"
+    assert login_email(" 10125 ") == "10125@studentflow.example.com"
+    assert login_email("1234") == "1234"
 
 
 def test_multiple_frontend_origins_are_normalized():

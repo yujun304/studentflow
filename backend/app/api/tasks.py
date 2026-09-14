@@ -1,11 +1,13 @@
 import uuid
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.security import csrf_protect, current_user, require_roles
@@ -13,6 +15,8 @@ from app.core.storage import storage
 from app.models.entities import (
     DecisionCard,
     DecisionStatus,
+    Event,
+    Notification,
     Role,
     StoredFile,
     Submission,
@@ -27,24 +31,21 @@ from app.models.entities import (
     User,
 )
 from app.schemas import (
-    ReviewIn,
     StatusIn,
     SubmissionFileOut,
     SubmissionIn,
-    SubmissionReviewOut,
-    TeamFormationIn,
-    TeamReviewOut,
     TaskIn,
     TaskOut,
+    TaskSubmissionOut,
     TaskUpdate,
+    TeamFormationIn,
 )
+from app.services.notifications import create_notifications
 from app.services.team_calendar import (
     approve_submission_teams,
     current_term_users,
     replace_team_members,
-    team_member_ids,
 )
-from app.services.notifications import create_notifications
 
 router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(csrf_protect)])
 manager = require_roles(Role.DEPARTMENT_HEAD, Role.EXECUTIVE_BOARD, Role.TEACHER)
@@ -206,6 +207,29 @@ async def update_task(
     return task_out(task, actor, assignee_ids)
 
 
+@router.delete("/{task_id}", status_code=204)
+async def delete_task(
+    task_id: uuid.UUID,
+    actor: User = Depends(manager),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    task = await db.get(Task, task_id)
+    if not task or task.term_id != actor.term_id:
+        raise AppError(404, "task_not_found", "업무를 찾을 수 없습니다.")
+    if not can_edit_task(task, actor):
+        raise AppError(403, "task_delete_forbidden", "직접 등록한 업무만 삭제할 수 있습니다.")
+    has_submission = await db.scalar(select(Submission.id).where(Submission.task_id == task.id))
+    has_team = await db.scalar(select(Team.id).where(Team.task_id == task.id))
+    if has_submission or has_team:
+        raise AppError(
+            409,
+            "task_has_records",
+            "제출물이나 조 편성 기록이 있는 업무는 삭제할 수 없습니다.",
+        )
+    await db.delete(task)
+    await db.commit()
+
+
 @router.patch("/{task_id}/status", response_model=TaskOut)
 async def change_status(
     task_id: uuid.UUID,
@@ -220,12 +244,13 @@ async def change_status(
         or (user.role == Role.MEMBER and not await assigned(db, task_id, user.id))
     ):
         raise AppError(404, "task_not_found", "업무를 찾을 수 없습니다.")
-    if (
-        user.role == Role.MEMBER
-        and data.status in {TaskStatus.REVIEW, TaskStatus.DONE, TaskStatus.REJECTED}
-        and task.type in {TaskType.SUBMISSION, TaskType.TEAM_FORMATION}
-    ):
-        raise AppError(403, "review_required", "제출 업무의 검토 상태는 관리자가 변경합니다.")
+    if data.status in {TaskStatus.REVIEW, TaskStatus.REJECTED}:
+        raise AppError(422, "status_removed", "검토와 반려 상태는 더 이상 사용하지 않습니다.")
+    if data.status == TaskStatus.DONE and task.type in {
+        TaskType.SUBMISSION,
+        TaskType.TEAM_FORMATION,
+    }:
+        raise AppError(403, "submit_to_complete", "결과를 제출하면 업무가 바로 완료됩니다.")
     task.status = data.status
     decision = await db.scalar(select(DecisionCard).where(DecisionCard.task_id == task.id))
     if decision:
@@ -234,115 +259,6 @@ async def change_status(
     await db.commit()
     assignee_ids = (await task_assignees(db, [task.id]))[task.id]
     return task_out(task, user, assignee_ids)
-
-
-@router.get("/submissions/pending", response_model=list[SubmissionReviewOut])
-async def pending_submissions(actor: User = Depends(manager), db: AsyncSession = Depends(get_db)):
-    latest_versions = (
-        select(
-            SubmissionVersion.submission_id,
-            func.max(SubmissionVersion.version).label("latest_version"),
-        )
-        .group_by(SubmissionVersion.submission_id)
-        .subquery()
-    )
-    statement = (
-        select(Submission, Task, User, SubmissionVersion)
-        .join(Task, Task.id == Submission.task_id)
-        .join(User, User.id == Submission.submitted_by)
-        .join(latest_versions, latest_versions.c.submission_id == Submission.id)
-        .join(
-            SubmissionVersion,
-            and_(
-                SubmissionVersion.submission_id == Submission.id,
-                SubmissionVersion.version == latest_versions.c.latest_version,
-            ),
-        )
-        .where(
-            Submission.status == SubmissionStatus.SUBMITTED,
-            Task.term_id == actor.term_id,
-        )
-    )
-    if actor.role == Role.DEPARTMENT_HEAD:
-        statement = statement.where(Task.created_by == actor.id)
-    rows = (await db.execute(statement.order_by(Submission.updated_at))).all()
-    version_ids = [version.id for _, _, _, version in rows]
-    files_by_version: dict[uuid.UUID, list[SubmissionFileOut]] = {}
-    if version_ids:
-        files = (
-            await db.scalars(
-                select(StoredFile)
-                .where(StoredFile.submission_version_id.in_(version_ids))
-                .order_by(StoredFile.created_at)
-            )
-        ).all()
-        for item in files:
-            files_by_version.setdefault(item.submission_version_id, []).append(
-                SubmissionFileOut.model_validate(item)
-            )
-    submission_ids = [submission.id for submission, _, _, _ in rows]
-    draft_teams = (
-        list(
-            (
-                await db.scalars(
-                    select(Team).where(Team.submission_id.in_(submission_ids)).order_by(Team.name)
-                )
-            ).all()
-        )
-        if submission_ids
-        else []
-    )
-    members = await team_member_ids(db, [team.id for team in draft_teams])
-    related_user_ids = {user_id for values in members.values() for user_id in values} | {
-        team.leader_id for team in draft_teams if team.leader_id
-    }
-    related_users = {
-        related_user.id: related_user
-        for related_user in (
-            await db.scalars(select(User).where(User.id.in_(related_user_ids)))
-        ).all()
-    }
-    teams_by_submission: dict[uuid.UUID, list[TeamReviewOut]] = {}
-    for team in draft_teams:
-        if not team.schedule_at:
-            continue
-        member_ids = members[team.id]
-        teams_by_submission.setdefault(team.submission_id, []).append(
-            TeamReviewOut(
-                id=team.id,
-                name=team.name,
-                description=team.description,
-                role_description=team.role_description,
-                leader_id=team.leader_id,
-                leader_name=(
-                    related_users[team.leader_id].name if team.leader_id in related_users else None
-                ),
-                member_ids=list(member_ids),
-                member_names=sorted(
-                    related_users[user_id].name
-                    for user_id in member_ids
-                    if user_id in related_users
-                ),
-                schedule_at=team.schedule_at,
-            )
-        )
-    return [
-        SubmissionReviewOut(
-            id=submission.id,
-            task_id=task.id,
-            task_title=task.title,
-            submitted_by=submitter.id,
-            submitted_by_name=submitter.name,
-            status=submission.status,
-            version_id=version.id,
-            version=version.version,
-            content=version.content,
-            submitted_at=version.created_at,
-            files=files_by_version.get(version.id, []),
-            teams=teams_by_submission.get(submission.id, []),
-        )
-        for submission, task, submitter, version in rows
-    ]
 
 
 @router.post("/{task_id}/team-formation", status_code=201)
@@ -359,18 +275,57 @@ async def submit_team_formation(
     if len(set(names)) != len(names):
         raise AppError(422, "duplicate_team_name", "조 이름은 서로 달라야 합니다.")
     all_member_ids: set[uuid.UUID] = set()
+    repeatable_member_ids = set(data.repeatable_member_ids)
     normalized_members: list[set[uuid.UUID]] = []
     for draft in data.teams:
         member_ids = set(draft.member_ids)
         if draft.leader_id:
             member_ids.add(draft.leader_id)
-        if all_member_ids & member_ids:
+        duplicated_ids = all_member_ids & member_ids
+        if duplicated_ids - repeatable_member_ids:
             raise AppError(
-                422, "duplicate_team_member", "한 사용자를 여러 조에 중복 배정할 수 없습니다."
+                422,
+                "duplicate_team_member",
+                "중복 허용으로 지정한 사용자만 여러 조에 배정할 수 있습니다.",
             )
         all_member_ids.update(member_ids)
         normalized_members.append(member_ids)
-    await current_term_users(db, task.term_id, all_member_ids)
+    if task.team_requirements and task.operation_days:
+        teams_by_day: dict[str, int] = {}
+        for draft, member_ids in zip(data.teams, normalized_members, strict=True):
+            if not draft.schedule_at:
+                raise AppError(422, "team_schedule_required", "모든 조의 활동 날짜를 정해 주세요.")
+            day_key = draft.schedule_at.astimezone(ZoneInfo(settings.default_timezone)).date().isoformat()
+            teams_by_day[day_key] = teams_by_day.get(day_key, 0) + 1
+            requirement = next(
+                (
+                    item
+                    for item in task.team_requirements
+                    if draft.name == item["name"] or draft.name.endswith(f" {item['name']}")
+                ),
+                None,
+            )
+            if not requirement:
+                raise AppError(422, "unknown_team", f"{draft.name}은 기획서에 없는 조입니다.")
+            if len(member_ids) != requirement["people_count"]:
+                raise AppError(
+                    422,
+                    "invalid_team_size",
+                    f"{requirement['name']}에 {requirement['people_count']}명을 배정해 주세요.",
+                )
+            if (draft.role_description or "").strip() != requirement["role_description"].strip():
+                raise AppError(422, "invalid_team_role", "기획서에 적힌 조 역할은 변경할 수 없습니다.")
+        if len(teams_by_day) != task.operation_days or any(
+            count != len(task.team_requirements) for count in teams_by_day.values()
+        ):
+            raise AppError(
+                422,
+                "invalid_team_schedule",
+                f"{task.operation_days}일 동안 하루 {len(task.team_requirements)}개 조를 편성해 주세요.",
+            )
+        if task.operation_dates and set(teams_by_day) != set(task.operation_dates):
+            raise AppError(422, "invalid_operation_dates", "기획서에서 선택한 날짜에 맞춰 편성해 주세요.")
+    await current_term_users(db, task.term_id, all_member_ids | repeatable_member_ids)
     submission = await db.scalar(
         select(Submission).where(Submission.task_id == task.id, Submission.submitted_by == user.id)
     )
@@ -417,21 +372,50 @@ async def submit_team_formation(
         db.add(team)
         await db.flush()
         await replace_team_members(db, team, member_ids)
-    submission.status = SubmissionStatus.SUBMITTED
+    submission.status = SubmissionStatus.APPROVED
     submission.rejection_reason = None
-    task.status = TaskStatus.REVIEW
+    task.status = TaskStatus.DONE
+    approved_teams = await approve_submission_teams(db, submission.id)
+    approved_members = {
+        team.id: set(
+            (
+                await db.scalars(
+                    select(TeamMember.user_id).where(TeamMember.team_id == team.id)
+                )
+            ).all()
+        )
+        for team in approved_teams
+    }
+    event = await db.get(Event, task.event_id) if task.event_id else None
+    for team in approved_teams:
+        schedule_text = (
+            team.schedule_at.astimezone(ZoneInfo(settings.default_timezone)).strftime("%Y-%m-%d %H:%M")
+            if team.schedule_at
+            else "일정 미정"
+        )
+        role_text = team.role_description or "공동 활동"
+        detail_parts = [
+            f"행사: {event.title}" if event else None,
+            f"행사 설명: {event.description}" if event and event.description else None,
+            f"시간: {schedule_text}",
+            f"집합 위치: {event.location}" if event and event.location else None,
+            f"조: {team.name}",
+            f"역할: {role_text}",
+            f"준비 사항: {team.description}" if team.description else None,
+        ]
+        db.add_all(
+            Notification(
+                user_id=member_id,
+                type="TEAM_ASSIGNED",
+                title=f"{team.name}에 배정되었습니다",
+                content="\n".join(value for value in detail_parts if value),
+                target_type="task",
+                target_id=task.id,
+            )
+            for member_id in approved_members[team.id]
+        )
     await db.commit()
     await db.refresh(version)
-    if task.created_by != user.id:
-        await create_notifications(
-            db,
-            {task.created_by},
-            notification_type="SUBMISSION_RECEIVED",
-            title="검토할 제출물이 도착했습니다",
-            content=task.title,
-            target_type="submission",
-            target_id=submission.id,
-        )
     return version
 
 
@@ -468,20 +452,82 @@ async def submit(
     db.add(version)
     submission.status = SubmissionStatus.SUBMITTED
     submission.rejection_reason = None
-    task.status = TaskStatus.REVIEW
+    task.status = TaskStatus.IN_PROGRESS
+    decision = await db.scalar(select(DecisionCard).where(DecisionCard.task_id == task.id))
+    if decision:
+        decision.status = DecisionStatus.OPEN
+        decision.completed_at = None
     await db.commit()
     await db.refresh(version)
-    if task.created_by != user.id:
-        await create_notifications(
-            db,
-            {task.created_by},
-            notification_type="SUBMISSION_RECEIVED",
-            title="검토할 제출물이 도착했습니다",
-            content=task.title,
-            target_type="submission",
-            target_id=submission.id,
-        )
     return version
+
+
+@router.get("/{task_id}/submissions", response_model=list[TaskSubmissionOut])
+async def list_task_submissions(
+    task_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await db.get(Task, task_id)
+    allowed = task and task.term_id == user.term_id and (
+        user.role in {Role.EXECUTIVE_BOARD, Role.TEACHER}
+        or task.created_by == user.id
+        or await assigned(db, task.id, user.id)
+    )
+    if not allowed:
+        raise AppError(404, "task_not_found", "업무를 찾을 수 없습니다.")
+
+    submissions = list(
+        (
+            await db.scalars(
+                select(Submission)
+                .where(Submission.task_id == task.id)
+                .order_by(Submission.created_at.desc())
+            )
+        ).all()
+    )
+    result: list[TaskSubmissionOut] = []
+    for submission in submissions:
+        version = await db.scalar(
+            select(SubmissionVersion)
+            .where(SubmissionVersion.submission_id == submission.id)
+            .order_by(SubmissionVersion.version.desc())
+            .limit(1)
+        )
+        if not version:
+            continue
+        submitter = await db.get(User, submission.submitted_by)
+        files = list(
+            (
+                await db.scalars(
+                    select(StoredFile)
+                    .where(StoredFile.submission_version_id == version.id)
+                    .order_by(StoredFile.created_at, StoredFile.id)
+                )
+            ).all()
+        )
+        result.append(
+            TaskSubmissionOut(
+                id=submission.id,
+                submitted_by=submission.submitted_by,
+                submitter_name=submitter.name if submitter else "알 수 없음",
+                version=version.version,
+                content=version.content,
+                created_at=version.created_at,
+                files=[
+                    SubmissionFileOut(
+                        id=item.id,
+                        original_name=item.original_name,
+                        mime_type=item.mime_type,
+                        size=item.size,
+                        created_at=item.created_at,
+                        download_path=f"/api/v1/tasks/files/{item.id}",
+                    )
+                    for item in files
+                ],
+            )
+        )
+    return result
 
 
 @router.post("/submission-versions/{version_id}/files", status_code=201)
@@ -501,7 +547,7 @@ async def upload_file(
     if (
         not submission
         or submission.submitted_by != user.id
-        or submission.status != SubmissionStatus.SUBMITTED
+        or submission.status not in {SubmissionStatus.SUBMITTED, SubmissionStatus.APPROVED}
         or version.version != latest_version
     ):
         raise AppError(403, "file_forbidden", "이 제출물에 파일을 추가할 수 없습니다.")
@@ -515,63 +561,40 @@ async def upload_file(
         uploaded_by=user.id,
     )
     db.add(item)
+    task = await db.get(Task, submission.task_id)
+    submission.status = SubmissionStatus.APPROVED
+    submission.rejection_reason = None
+    if task:
+        task.status = TaskStatus.DONE
+        decision = await db.scalar(select(DecisionCard).where(DecisionCard.task_id == task.id))
+        if decision:
+            decision.status = DecisionStatus.DONE
+            decision.completed_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(item)
+    if task and task.event_id:
+        teacher_ids = set(
+            (
+                await db.scalars(
+                    select(User.id).where(
+                        User.term_id == task.term_id,
+                        User.role == Role.TEACHER,
+                        User.is_active.is_(True),
+                    )
+                )
+            ).all()
+        )
+        if teacher_ids:
+            await create_notifications(
+                db,
+                teacher_ids,
+                notification_type="POSTER_SUBMITTED",
+                title="행사 포스터가 제출되었습니다",
+                content=f"{user.name}님이 {task.title} 파일을 제출했습니다.",
+                target_type="task",
+                target_id=task.id,
+            )
     return item
-
-
-@router.post("/submissions/{submission_id}/review")
-async def review(
-    submission_id: uuid.UUID,
-    data: ReviewIn,
-    actor: User = Depends(manager),
-    db: AsyncSession = Depends(get_db),
-):
-    if data.status not in {SubmissionStatus.APPROVED, SubmissionStatus.REJECTED}:
-        raise AppError(422, "invalid_review", "승인 또는 반려 상태를 선택해 주세요.")
-    if data.status == SubmissionStatus.REJECTED and not data.reason:
-        raise AppError(422, "reason_required", "반려 사유가 필요합니다.")
-    submission = await db.get(Submission, submission_id)
-    if not submission:
-        raise AppError(404, "submission_not_found", "제출물을 찾을 수 없습니다.")
-    task = await db.get(Task, submission.task_id)
-    if actor.role == Role.DEPARTMENT_HEAD and task.created_by != actor.id:
-        raise AppError(403, "department_scope", "직접 생성한 업무만 검토할 수 있습니다.")
-    submission.status = data.status
-    submission.rejection_reason = data.reason
-    submission.reviewed_by = actor.id
-    task.status = (
-        TaskStatus.DONE if data.status == SubmissionStatus.APPROVED else TaskStatus.REJECTED
-    )
-    decision = await db.scalar(select(DecisionCard).where(DecisionCard.task_id == task.id))
-    if decision:
-        decision.status = (
-            DecisionStatus.DONE
-            if data.status == SubmissionStatus.APPROVED
-            else DecisionStatus.OPEN
-        )
-        decision.completed_at = (
-            datetime.now(UTC) if data.status == SubmissionStatus.APPROVED else None
-        )
-    if task.type == TaskType.TEAM_FORMATION and data.status == SubmissionStatus.APPROVED:
-        teams = await approve_submission_teams(db, submission.id)
-        if not teams:
-            raise AppError(422, "team_formation_missing", "승인할 조 편성 데이터가 없습니다.")
-    await db.commit()
-    await create_notifications(
-        db,
-        {submission.submitted_by},
-        notification_type="SUBMISSION_REVIEWED",
-        title="제출물 검토가 완료되었습니다",
-        content=(
-            f"{task.title} · 승인"
-            if data.status == SubmissionStatus.APPROVED
-            else f"{task.title} · 반려: {data.reason}"
-        ),
-        target_type="task",
-        target_id=task.id,
-    )
-    return submission
 
 
 @router.get("/files/{file_id}")

@@ -1,6 +1,6 @@
 import uuid
 from datetime import date, datetime, time
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -12,7 +12,6 @@ from app.models.entities import (
     RequestStatus,
     Role,
     RunItemStatus,
-    SubmissionStatus,
     TaskStatus,
     TaskType,
 )
@@ -103,6 +102,41 @@ class EventOut(ORMModel):
     status: str
     manager_id: uuid.UUID | None = None
     participant_ids: list[uuid.UUID] = Field(default_factory=list)
+    can_manage: bool = False
+
+
+class EventUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    location: str | None = Field(default=None, max_length=200)
+    event_date: date
+    starts_at: time | None = None
+    ends_at: time | None = None
+
+
+class TeacherEventCreateIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    type: EventType = EventType.EVENT
+    purpose: str = Field(min_length=1, max_length=2000)
+    target_participants: str = Field(min_length=1, max_length=1000)
+    schedule_plan: str = Field(min_length=1, max_length=2000)
+    program_plan: str = Field(min_length=1, max_length=5000)
+    preparation_plan: str | None = Field(default=None, max_length=2000)
+    safety_plan: str | None = Field(default=None, max_length=2000)
+    location: str = Field(min_length=1, max_length=200)
+    event_date: date
+    starts_at: time | None = None
+    ends_at: time | None = None
+    operation_dates: list[date] = Field(min_length=1, max_length=30)
+    team_requirements: list["TeamRequirementIn"] = Field(min_length=1, max_length=20)
+    team_manager_id: uuid.UUID
+    participant_ids: list[uuid.UUID] = Field(min_length=1)
+    formation_due_at: datetime | None = None
+
+
+class TeacherEventCreateOut(BaseModel):
+    event_id: uuid.UUID
+    task_id: uuid.UUID
 
 
 class TaskIn(BaseModel):
@@ -122,6 +156,12 @@ class TaskOut(ORMModel):
     status: TaskStatus
     event_id: uuid.UUID | None
     due_at: datetime | None
+    operation_days: int | None = None
+    teams_per_day: int | None = None
+    people_per_team: int | None = None
+    team_role_description: str | None = None
+    team_requirements: list[dict] | None = None
+    operation_dates: list[date] | None = None
     assigned_to_me: bool = False
     assignee_ids: list[uuid.UUID] = Field(default_factory=list)
     can_edit: bool = False
@@ -144,16 +184,23 @@ class SubmissionIn(BaseModel):
     content: str | None = None
 
 
-class ReviewIn(BaseModel):
-    status: SubmissionStatus
-    reason: str | None = None
-
-
-class SubmissionFileOut(ORMModel):
+class SubmissionFileOut(BaseModel):
     id: uuid.UUID
     original_name: str
     mime_type: str
     size: int
+    created_at: datetime
+    download_path: str
+
+
+class TaskSubmissionOut(BaseModel):
+    id: uuid.UUID
+    submitted_by: uuid.UUID
+    submitter_name: str
+    version: int
+    content: str | None
+    created_at: datetime
+    files: list[SubmissionFileOut] = Field(default_factory=list)
 
 
 class TeamDraftIn(BaseModel):
@@ -165,36 +212,10 @@ class TeamDraftIn(BaseModel):
     schedule_at: datetime
 
 
-class TeamReviewOut(BaseModel):
-    id: uuid.UUID
-    name: str
-    description: str | None
-    role_description: str | None
-    leader_id: uuid.UUID | None
-    leader_name: str | None
-    member_ids: list[uuid.UUID]
-    member_names: list[str]
-    schedule_at: datetime
-
-
 class TeamFormationIn(BaseModel):
     content: str | None = None
     teams: list[TeamDraftIn] = Field(min_length=1)
-
-
-class SubmissionReviewOut(BaseModel):
-    id: uuid.UUID
-    task_id: uuid.UUID
-    task_title: str
-    submitted_by: uuid.UUID
-    submitted_by_name: str
-    status: SubmissionStatus
-    version_id: uuid.UUID
-    version: int
-    content: str | None
-    submitted_at: datetime
-    files: list[SubmissionFileOut] = Field(default_factory=list)
-    teams: list[TeamReviewOut] = Field(default_factory=list)
+    repeatable_member_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class NoticeIn(BaseModel):
@@ -326,20 +347,397 @@ class MeetingRecordOut(MeetingRecordIn, ORMModel):
 
 
 class CommentIn(BaseModel):
-    target_type: str
+    target_type: Literal["task"]
     target_id: uuid.UUID
-    content: str
+    content: str = Field(min_length=1, max_length=2000)
     parent_id: uuid.UUID | None = None
 
 
 class CommentOut(CommentIn, ORMModel):
     id: uuid.UUID
     author_id: uuid.UUID
+    author_name: str = ""
+    is_mine: bool = False
+    can_delete: bool = False
+    deleted: bool = False
     created_at: datetime
 
 
-class QuickMemoIn(BaseModel):
+class CommunityPostIn(BaseModel):
+    kind: Literal["DISCUSSION", "SUGGESTION", "POLL"] = "SUGGESTION"
+    title: str = Field(min_length=1, max_length=160)
+    content: str = Field(min_length=10, max_length=5000)
+    is_anonymous: bool = False
+    poll_options: list[str] = Field(default_factory=list, max_length=6)
+
+
+class CommunityPostUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    content: str = Field(min_length=10, max_length=5000)
+    is_anonymous: bool = False
+
+
+class CommunityRecommendationCountIn(BaseModel):
+    count: int = Field(ge=0, le=999)
+
+
+class CommunityCommentIn(BaseModel):
+    content: str = Field(min_length=1, max_length=1000)
+    is_anonymous: bool = False
+
+
+class CommunityCommentUpdate(CommunityCommentIn):
+    pass
+
+
+class CommunityPollVoteIn(BaseModel):
+    option_id: uuid.UUID
+
+
+class CommunityPollOptionOut(BaseModel):
+    id: uuid.UUID
+    label: str
+    position: int
+    vote_count: int = 0
+
+
+class CommunityCommentOut(BaseModel):
+    id: uuid.UUID
+    author_id: uuid.UUID | None
+    author_name: str
     content: str
+    is_anonymous: bool = False
+    is_mine: bool = False
+    created_at: datetime
+
+
+class TeamRequirementIn(BaseModel):
+    name: str = Field(max_length=50)
+    people_count: int = Field(ge=1, le=20)
+    role_description: str = Field(max_length=500)
+    start_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+class CommunityEventPlanFields(BaseModel):
+    purpose: str | None = Field(default=None, max_length=2000)
+    target_participants: str | None = Field(default=None, max_length=1000)
+    schedule_plan: str | None = Field(default=None, max_length=1000)
+    location_plan: str | None = Field(default=None, max_length=1000)
+    program_plan: str | None = Field(default=None, max_length=5000)
+    role_plan: str | None = Field(default=None, max_length=3000)
+    budget_plan: str | None = Field(default=None, max_length=2000)
+    safety_plan: str | None = Field(default=None, max_length=2000)
+    operation_days: int | None = Field(default=None, ge=1, le=30)
+    teams_per_day: int | None = Field(default=None, ge=1, le=20)
+    people_per_team: int | None = Field(default=None, ge=1, le=20)
+    team_role_description: str | None = Field(default=None, max_length=500)
+    team_requirements: list[TeamRequirementIn] | None = Field(
+        default=None, min_length=1, max_length=20
+    )
+    operation_dates: list[date] | None = Field(default=None, min_length=1, max_length=30)
+    team_manager_id: uuid.UUID | None = None
+    poster_manager_id: uuid.UUID | None = None
+    poster_required: bool = True
+
+
+class CommunityEventPlanIn(CommunityEventPlanFields):
+    base_version: int | None = Field(default=None, ge=1)
+
+
+class CommunityEventPlanOut(CommunityEventPlanFields, ORMModel):
+    team_manager_id: uuid.UUID | None = None
+    poster_manager_id: uuid.UUID | None = None
+    team_requirements: list[TeamRequirementIn] | None = None
+    id: uuid.UUID
+    post_id: uuid.UUID
+    author_id: uuid.UUID
+    status: Literal["DRAFT", "IN_REVIEW", "CHANGES_REQUESTED", "REJECTED", "APPROVED"] = "DRAFT"
+    version: int = 1
+    submitted_at: datetime | None = None
+    submitted_by: uuid.UUID | None = None
+    approved_at: datetime | None = None
+    approved_by: uuid.UUID | None = None
+    review_note: str | None = None
+    team_task_id: uuid.UUID | None = None
+    can_edit: bool = False
+    can_submit: bool = False
+    can_review: bool = False
+    can_convert: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class CommunityPlanSubmitIn(BaseModel):
+    base_version: int = Field(ge=1)
+
+
+class CommunityPlanReviewIn(BaseModel):
+    action: Literal["APPROVE", "REQUEST_CHANGES", "REJECT"]
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class CommunityPlanWriterIn(BaseModel):
+    writer_id: uuid.UUID
+
+
+class CommunityAgendaScheduleIn(BaseModel):
+    meeting_date: date
+    meeting_time_slot: Literal["MORNING", "LUNCH", "AFTER_SCHOOL"]
+    meeting_time: time | None = None
+
+
+class CommunityPlanSuggestionIn(BaseModel):
+    section: Literal[
+        "purpose",
+        "target_participants",
+        "schedule_plan",
+        "location_plan",
+        "program_plan",
+        "role_plan",
+        "budget_plan",
+        "safety_plan",
+    ]
+    proposed_content: str = Field(min_length=1, max_length=5000)
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+class CommunityPlanSuggestionResolveIn(BaseModel):
+    action: Literal["ADOPT", "REJECT"]
+    base_version: int = Field(ge=1)
+
+
+class CommunityPlanSuggestionOut(BaseModel):
+    id: uuid.UUID
+    section: str
+    proposed_content: str
+    reason: str | None
+    status: Literal["OPEN", "ADOPTED", "REJECTED"]
+    author_id: uuid.UUID
+    author_name: str
+    resolved_by: uuid.UUID | None = None
+    resolved_at: datetime | None = None
+    created_at: datetime
+
+
+class CommunityPlanRevisionOut(BaseModel):
+    id: uuid.UUID
+    version: int
+    editor_id: uuid.UUID
+    editor_name: str
+    created_at: datetime
+
+
+class CommunityPlanContributorOut(BaseModel):
+    user_id: uuid.UUID
+    name: str
+
+
+class CommunityPlanWorkspaceOut(BaseModel):
+    plan: CommunityEventPlanOut
+    contributors: list[CommunityPlanContributorOut] = Field(default_factory=list)
+    suggestions: list[CommunityPlanSuggestionOut] = Field(default_factory=list)
+    revisions: list[CommunityPlanRevisionOut] = Field(default_factory=list)
+
+
+class CommunityPostOut(BaseModel):
+    id: uuid.UUID
+    kind: Literal["DISCUSSION", "SUGGESTION", "POLL"]
+    title: str
+    content: str
+    author_id: uuid.UUID | None
+    author_name: str
+    is_anonymous: bool = False
+    is_mine: bool = False
+    created_at: datetime
+    updated_at: datetime
+    comment_count: int = 0
+    comments: list[CommunityCommentOut] = Field(default_factory=list)
+    poll_options: list[CommunityPollOptionOut] = Field(default_factory=list)
+    total_votes: int = 0
+    current_user_vote: uuid.UUID | None = None
+    recommendation_count: int = 0
+    recommended_by_me: bool = False
+    test_recommendation_bonus: int = 0
+    agenda_at: datetime | None = None
+    plan_writer_id: uuid.UUID | None = None
+    plan_writer_name: str | None = None
+    meeting_date: date | None = None
+    meeting_time_slot: str | None = None
+    meeting_time: time | None = None
+    can_assign_plan_writer: bool = False
+    can_schedule_meeting: bool = False
+    can_write_plan: bool = False
+    plan: CommunityEventPlanOut | None = None
+    converted_event_id: uuid.UUID | None = None
+    converted_at: datetime | None = None
+
+
+class CommunityEventConversionIn(BaseModel):
+    event_date: date
+    location: str | None = Field(default=None, max_length=200)
+    starts_at: time | None = None
+    ends_at: time | None = None
+
+
+class ProposalCreateIn(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    description: str = Field(min_length=1, max_length=5000)
+    topic: str | None = Field(default=None, max_length=160)
+
+
+class ProposalVersionCreateIn(ProposalCreateIn):
+    base_version: int = Field(ge=1)
+    change_summary: str = Field(min_length=1, max_length=500)
+
+
+class ProposalFeedbackIn(BaseModel):
+    category: Literal["STRENGTH", "CONCERN", "CHANGE", "NEW_IDEA"]
+    content: str = Field(min_length=1, max_length=1000)
+
+
+class ProposalFeedbackOut(BaseModel):
+    id: uuid.UUID
+    version_number: int
+    author_id: uuid.UUID
+    author_name: str
+    category: Literal["STRENGTH", "CONCERN", "CHANGE", "NEW_IDEA"]
+    content: str
+    is_mine: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProposalAttachmentOut(BaseModel):
+    id: uuid.UUID
+    original_name: str
+    mime_type: str
+    size: int
+    download_path: str
+    purpose: Literal["GENERAL", "IDEA_FILE", "MEETING_AUDIO"] = "GENERAL"
+
+
+class ProposalVersionOut(BaseModel):
+    id: uuid.UUID
+    version_number: int
+    title: str
+    description: str
+    topic: str | None = None
+    change_summary: str | None = None
+    author_id: uuid.UUID
+    author_name: str
+    created_at: datetime
+    attachments: list[ProposalAttachmentOut] = Field(default_factory=list)
+
+
+class ProposalSummaryOut(BaseModel):
+    strengths: list[str] = Field(default_factory=list)
+    concerns: list[str] = Field(default_factory=list)
+    changes: list[str] = Field(default_factory=list)
+    new_ideas: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    provider: Literal["ai", "fallback"] = "fallback"
+    generated_at: datetime
+
+
+class ProposalListOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    description: str
+    topic: str | None = None
+    status: Literal["DISCUSSING", "RE_REVIEW", "CONFIRMED"]
+    planning_stage: Literal[
+        "DISCUSSING",
+        "MEETING_AGENDA",
+        "MEETING_COMPLETED",
+        "FINAL_PLAN_DRAFT",
+        "PENDING_TEACHER_REVIEW",
+        "REVISION_REQUESTED",
+        "REJECTED",
+        "APPROVED",
+        "ASSIGNING_TEAMS",
+        "SCHEDULED",
+    ] = "DISCUSSING"
+    current_version: int
+    author_name: str
+    feedback_count: int = 0
+    has_current_user_feedback: bool = False
+    recommendation_count: int = 0
+    recommended_by_me: bool = False
+    feedback_required: bool = False
+    required_feedback_recommendation_threshold: int = 13
+    is_current_user_feedback_required: bool = False
+    required_feedback_count: int = 0
+    completed_required_feedback_count: int = 0
+    updated_at: datetime
+
+
+class ProposalDetailOut(ProposalListOut):
+    current: ProposalVersionOut
+    versions: list[ProposalVersionOut] = Field(default_factory=list)
+    feedback: list[ProposalFeedbackOut] = Field(default_factory=list)
+    summary: ProposalSummaryOut | None = None
+    can_confirm: bool = False
+    can_edit: bool = False
+    can_delete: bool = False
+
+
+class ProposalConfirmIn(BaseModel):
+    base_version: int = Field(ge=1)
+
+
+class ProposalMeetingNotesIn(BaseModel):
+    transcript: str = Field(default="", max_length=100000)
+    manual_notes: str | None = Field(default=None, max_length=20000)
+
+
+class ProposalMeetingRecordDraftIn(BaseModel):
+    transcript: str = Field(min_length=1, max_length=100000)
+
+
+class ProposalMeetingRecordDraftOut(BaseModel):
+    title: str
+    held_at: datetime | None = None
+    location: str = ""
+    summary: str = ""
+    decisions: str = ""
+    next_actions: str = ""
+
+
+class ProposalPlanningDocumentIn(BaseModel):
+    document: dict = Field(default_factory=dict)
+
+
+class ProposalWorkflowOut(BaseModel):
+    stage: Literal[
+        "DISCUSSING",
+        "MEETING_AGENDA",
+        "MEETING_COMPLETED",
+        "FINAL_PLAN_DRAFT",
+        "PENDING_TEACHER_REVIEW",
+        "REVISION_REQUESTED",
+        "REJECTED",
+        "APPROVED",
+        "ASSIGNING_TEAMS",
+        "SCHEDULED",
+    ]
+    brief_plan: dict | None = None
+    meeting_audio: ProposalAttachmentOut | None = None
+    meeting_transcript: str | None = None
+    meeting_notes: dict | None = None
+    final_plan: dict | None = None
+    plan: CommunityEventPlanOut | None = None
+    can_manage: bool = False
+    can_promote: bool = False
+    audio_extensions: list[str] = Field(default_factory=list)
+    audio_max_bytes: int
+    can_transcribe: bool = False
+    can_auto_process: bool = False
+    can_generate_brief: bool = False
+
+
+class QuickMemoIn(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
 
 
 class QuickMemoOut(QuickMemoIn, ORMModel):
@@ -394,6 +792,17 @@ class SavedItemIn(BaseModel):
 
 class SavedItemOut(SavedItemIn, ORMModel):
     id: uuid.UUID
+    created_at: datetime
+
+
+class AuditLogOut(BaseModel):
+    id: uuid.UUID
+    actor_id: uuid.UUID | None
+    actor_name: str
+    action: str
+    entity_type: str
+    entity_id: uuid.UUID | None
+    detail: str | None
     created_at: datetime
 
 
@@ -500,6 +909,10 @@ class EventRunItemStatusIn(BaseModel):
     note: str | None = None
 
 
+class EventRunItemsReorderIn(BaseModel):
+    item_ids: list[uuid.UUID] = Field(min_length=1)
+
+
 class EventRunItemOut(ORMModel):
     id: uuid.UUID
     event_id: uuid.UUID
@@ -519,6 +932,8 @@ class SchoolMapOut(ORMModel):
     term_id: uuid.UUID
     event_id: uuid.UUID | None
     title: str
+    floor_label: str
+    floor_order: int
     image_url: str = ""
     can_manage: bool = False
     created_at: datetime
@@ -546,3 +961,33 @@ class MapAssignmentOut(ORMModel):
     starts_at: datetime | None
     ends_at: datetime | None
     can_manage: bool = False
+
+
+class MapAssignmentPositionIn(BaseModel):
+    x_ratio: float = Field(ge=0, le=1)
+    y_ratio: float = Field(ge=0, le=1)
+
+
+class EventCompletionRecordIn(BaseModel):
+    summary: str = Field(min_length=1)
+    outcomes: str | None = None
+    incidents: str | None = None
+    recommendations: str | None = None
+    attendee_count: int | None = Field(default=None, ge=0)
+    completed_at: datetime
+    create_handover_draft: bool = True
+
+
+class EventCompletionRecordOut(ORMModel):
+    id: uuid.UUID
+    event_id: uuid.UUID
+    event_title: str = ""
+    summary: str
+    outcomes: str | None
+    incidents: str | None
+    recommendations: str | None
+    attendee_count: int | None
+    completed_at: datetime
+    handover_guide_id: uuid.UUID | None
+    can_manage: bool = False
+    created_at: datetime

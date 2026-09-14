@@ -1,9 +1,138 @@
-/** StudentFlow | 학기 운영 보드: 백색 문서 바탕, 가는 규칙선, 한 가지 운영 파랑 */
+/** StudentFlow | 학교 운영 문서처럼 차분한 중성 바탕과 한 가지 남색 포인트 */
 @import "tailwindcss";
 @import "tw-animate-css";
 @custom-variant dark (&:is(.dark *));
 @theme inline { --radius-sm: calc(var(--radius) - 3px); --radius-md: calc(var(--radius) - 1px); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) + 3px); --color-background: var(--background); --color-foreground: var(--foreground); --color-card: var(--card); --color-card-foreground: var(--card-foreground); --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground); --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground); --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground); --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground); --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground); --color-destructive: var(--destructive); --color-destructive-foreground: var(--destructive-foreground); --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring); --color-sidebar: var(--sidebar); --color-sidebar-foreground: var(--sidebar-foreground); --color-sidebar-primary: var(--sidebar-primary); --color-sidebar-primary-foreground: var(--sidebar-primary-foreground); --color-sidebar-accent: var(--sidebar-accent); --color-sidebar-accent-foreground: var(--sidebar-accent-foreground); --color-sidebar-border: var(--sidebar-border); --color-sidebar-ring: var(--sidebar-ring); }
-:root { --radius: .45rem; --background: #f7f8fa; --foreground: #172033; --card: #fff; --card-foreground: #172033; --popover: #fff; --popover-foreground: #172033; --primary: #2563a8; --primary-foreground: #fff; --secondary: #eff2f5; --secondary-foreground: #334155; --muted: #f1f3f5; --muted-foreground: #64748b; --accent: #e8f0f8; --accent-foreground: #1f528b; --destructive: #b42318; --destructive-foreground: #fff; --border: #e2e8f0; --input: #cbd5e1; --ring: #2563a8; --sidebar: #fff; --sidebar-foreground: #334155; --sidebar-primary: #2563a8; --sidebar-primary-foreground: #fff; --sidebar-accent: #e8f0f8; --sidebar-accent-foreground: #1f528b; --sidebar-border: #e2e8f0; --sidebar-ring: #2563a8; }
-@layer base { * { @apply border-border outline-ring/50; } html { min-width: 360px; } body { @apply bg-background text-foreground; font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif; text-rendering: optimizeLegibility; } button:not(:disabled), [role="button"]:not([aria-disabled="true"]), [type="button"]:not(:disabled), [type="submit"]:not(:disabled), a[href], select:not(:disabled), input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { @apply cursor-pointer; } button, input, textarea, select { font: inherit; } ::selection { background: #cfe0f3; color: #172033; } }
+:root {
+  color-scheme: light;
+  --radius: .125rem;
+  --background: #f5f5f3;
+  --foreground: #20242b;
+  --card: #ffffff;
+  --card-foreground: #20242b;
+  --popover: #ffffff;
+  --popover-foreground: #20242b;
+  --primary: #315575;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f1ef;
+  --secondary-foreground: #343b44;
+  --muted: #eeefed;
+  --muted-foreground: #69717a;
+  --accent: #e7edf1;
+  --accent-foreground: #294b67;
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
+  --border: #dfe1de;
+  --input: #c9cdc9;
+  --ring: #52738e;
+  --sidebar: #fbfbfa;
+  --sidebar-foreground: #343b44;
+  --sidebar-primary: #315575;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e7edf1;
+  --sidebar-accent-foreground: #294b67;
+  --sidebar-border: #dfe1de;
+  --sidebar-ring: #52738e;
+
+  --color-slate-50: #f7f7f5;
+  --color-slate-100: #eeefed;
+  --color-slate-200: #dfe1de;
+  --color-slate-300: #c9cdc9;
+  --color-slate-400: #969d9f;
+  --color-slate-500: #69717a;
+  --color-slate-600: #4d555e;
+  --color-slate-700: #343b44;
+  --color-slate-800: #292f36;
+  --color-slate-900: #20242b;
+  --color-slate-950: #171a1f;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #222831;
+  --foreground: #EEEEEE;
+  --card: #31363F;
+  --card-foreground: #EEEEEE;
+  --popover: #31363F;
+  --popover-foreground: #EEEEEE;
+  --primary: #76ABAE;
+  --primary-foreground: #222831;
+  --secondary: color-mix(in oklch, #31363F 82%, #76ABAE);
+  --secondary-foreground: #EEEEEE;
+  --muted: #31363F;
+  --muted-foreground: color-mix(in oklch, #EEEEEE 68%, #31363F);
+  --accent: color-mix(in oklch, #76ABAE 32%, #31363F);
+  --accent-foreground: #EEEEEE;
+  --destructive: #ef7069;
+  --destructive-foreground: #222831;
+  --border: color-mix(in oklch, #76ABAE 35%, #31363F);
+  --input: color-mix(in oklch, #76ABAE 52%, #31363F);
+  --ring: #76ABAE;
+  --sidebar: #31363F;
+  --sidebar-foreground: #EEEEEE;
+  --sidebar-primary: #76ABAE;
+  --sidebar-primary-foreground: #222831;
+  --sidebar-accent: color-mix(in oklch, #76ABAE 24%, #31363F);
+  --sidebar-accent-foreground: #EEEEEE;
+  --sidebar-border: color-mix(in oklch, #76ABAE 35%, #31363F);
+  --sidebar-ring: #76ABAE;
+
+  --color-slate-50: color-mix(in oklch, #31363F 88%, #76ABAE);
+  --color-slate-100: color-mix(in oklch, #31363F 78%, #76ABAE);
+  --color-slate-200: color-mix(in oklch, #31363F 65%, #76ABAE);
+  --color-slate-300: color-mix(in oklch, #EEEEEE 45%, #31363F);
+  --color-slate-400: color-mix(in oklch, #EEEEEE 58%, #31363F);
+  --color-slate-500: color-mix(in oklch, #EEEEEE 68%, #31363F);
+  --color-slate-600: color-mix(in oklch, #EEEEEE 78%, #31363F);
+  --color-slate-700: color-mix(in oklch, #EEEEEE 86%, #31363F);
+  --color-slate-800: #EEEEEE;
+  --color-slate-900: #EEEEEE;
+  --color-slate-950: #EEEEEE;
+}
+
+/* Keep existing utility-heavy screens on the shared theme tokens. */
+.bg-\[\#f7f8fa\] { background-color: var(--background); }
+.bg-\[\#fafcff\], .bg-\[\#f8fbfe\], .bg-\[\#f7fbff\], .bg-\[\#f4f8fc\],
+.bg-\[\#f3f7fb\], .bg-\[\#f3f8fd\] { background-color: var(--secondary); }
+.bg-\[\#e8f0f8\] { background-color: var(--accent); }
+.bg-\[\#2563a8\] { background-color: var(--primary); }
+.text-\[\#2563a8\], .text-\[\#1f528b\] { color: var(--primary); }
+.border-\[\#2563a8\] { border-color: var(--primary); }
+.border-\[\#c9ddf2\], .border-\[\#cbd8e6\], .border-\[\#9bbada\] { border-color: var(--border); }
+.ring-\[\#2563a8\] { --tw-ring-color: var(--ring); }
+.accent-\[\#2563a8\] { accent-color: var(--primary); }
+.hover\:bg-\[\#1f528b\]:hover { background-color: color-mix(in oklch, var(--primary) 86%, #171a1f); }
+.hover\:bg-\[\#f8fbfe\]:hover { background-color: var(--secondary); }
+.hover\:text-\[\#2563a8\]:hover, .hover\:text-\[\#1f528b\]:hover { color: var(--primary); }
+.focus\:border-\[\#2563a8\]:focus { border-color: var(--ring); }
+.focus\:ring-\[\#2563a8\]:focus, .focus-visible\:ring-\[\#2563a8\]:focus-visible { --tw-ring-color: var(--ring); }
+.group:hover .group-hover\:text-\[\#1f528b\] { color: var(--primary); }
+
+.dark .bg-white { background-color: var(--card); }
+.dark .bg-black { background-color: var(--background); }
+.dark .border-white { border-color: var(--foreground); }
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  html { min-width: 360px; }
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif;
+    line-height: 1.55;
+    letter-spacing: -0.01em;
+    text-rendering: optimizeLegibility;
+  }
+  main h1 {
+    font-size: clamp(1.5rem, 1.38rem + .45vw, 1.75rem);
+    line-height: clamp(1.9rem, 1.75rem + .4vw, 2.25rem);
+    text-wrap: balance;
+  }
+  :where(a[href], button, input, select, textarea):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  button:not(:disabled), [role="button"]:not([aria-disabled="true"]), [type="button"]:not(:disabled), [type="submit"]:not(:disabled), a[href], select:not(:disabled), input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { @apply cursor-pointer; }
+  button, input, textarea, select { font: inherit; }
+  ::selection { background: #dce6ed; color: #20242b; }
+}
 @media (prefers-reduced-motion: no-preference) { a, button, input, select, textarea { transition: border-color 150ms cubic-bezier(.23,1,.32,1), background-color 150ms cubic-bezier(.23,1,.32,1), color 150ms cubic-bezier(.23,1,.32,1), transform 150ms cubic-bezier(.23,1,.32,1); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; } }

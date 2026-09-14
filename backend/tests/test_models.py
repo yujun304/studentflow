@@ -1,5 +1,5 @@
-from app.core.database import Base
 import app.models  # noqa: F401
+from app.core.database import Base
 
 
 def test_mvp_tables_are_registered():
@@ -21,6 +21,7 @@ def test_mvp_tables_are_registered():
         "meeting_records",
         "meeting_attendees",
         "comments",
+        "community_event_plans",
         "quick_memos",
         "reminders",
         "saved_items",
@@ -31,5 +32,6 @@ def test_mvp_tables_are_registered():
         "event_run_items",
         "school_maps",
         "map_assignments",
+        "event_completion_records",
     }
     assert expected <= set(Base.metadata.tables)

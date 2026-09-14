@@ -1,9 +1,9 @@
 /** StudentFlow | 학기 운영 보드: 데스크톱은 드래그 가능한 문서형 칸반, 모바일은 상태 탭 목록 */
-import { GripVertical, Plus, Search } from "lucide-react";
+import { CheckCircle2, GripVertical, Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link } from "wouter";
+import { Link } from "@/components/MpaLink";
 import { useApp } from "@/contexts/AppContext";
-import type { Task, TaskStatus } from "@/types";
+import type { Task, TaskStatus, TaskType } from "@/types";
 import {
   AppModal,
   Button,
@@ -15,13 +15,16 @@ import {
 const columns: Array<{ status: TaskStatus; label: string }> = [
   { status: "TODO", label: "해야 할 일" },
   { status: "IN_PROGRESS", label: "진행 중" },
-  { status: "IN_REVIEW", label: "검토 중" },
   { status: "DONE", label: "완료" },
-  { status: "REJECTED", label: "반려" },
 ];
 const labels = Object.fromEntries(
   columns.map(column => [column.status, column.label])
 ) as Record<TaskStatus, string>;
+const typeLabels: Record<TaskType, string> = {
+  SIMPLE: "일반 업무",
+  SUBMISSION: "파일 제출",
+  TEAM_FORMATION: "자동 조 편성",
+};
 
 function TaskRow({
   task,
@@ -60,6 +63,9 @@ function TaskRow({
         </p>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        <span className="rounded bg-[#e8f0f8] px-2 py-1 text-[11px] font-semibold text-[#1f528b]">
+          {typeLabels[task.type]}
+        </span>
         <span
           className={`border-l-2 pl-2 text-xs font-semibold ${overdue && task.status !== "DONE" ? "border-[#b42318] text-[#b42318]" : "border-[#2563a8] text-slate-600"}`}
         >
@@ -78,17 +84,24 @@ function TaskRow({
 }
 
 export default function TasksPage() {
+  const requestedType = new URLSearchParams(window.location.search).get("create");
+  const initialType: TaskType =
+    requestedType === "TEAM_FORMATION" || requestedType === "SUBMISSION"
+      ? requestedType
+      : "SIMPLE";
   const { tasks, currentRole, currentUser, createTask, updateTaskStatus } =
     useApp();
   const [status, setStatus] = useState<TaskStatus>("TODO");
   const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [open, setOpen] = useState(requestedType !== null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<TaskStatus | null>(null);
   const [moveMessage, setMoveMessage] = useState("");
   const [form, setForm] = useState({
     title: "",
     description: "",
+    type: initialType,
     department: currentUser.department,
     dueDate: "2026-08-22 16:30",
     priority: "보통" as Task["priority"],
@@ -103,6 +116,10 @@ export default function TasksPage() {
       ),
     [tasks, query]
   );
+  const completedCount = shown.filter(task => task.status === "DONE").length;
+  const visibleColumns = showCompleted
+    ? columns
+    : columns.filter(column => column.status !== "DONE");
   function submit(event: React.FormEvent) {
     event.preventDefault();
     if (form.title.trim().length < 4)
@@ -112,6 +129,7 @@ export default function TasksPage() {
     setForm({
       title: "",
       description: "",
+      type: "SIMPLE",
       department: currentUser.department,
       dueDate: "2026-08-22 16:30",
       priority: "보통",
@@ -143,13 +161,7 @@ export default function TasksPage() {
     <div className="mx-auto max-w-[1440px] px-4 py-7 sm:px-6 lg:px-8">
       <header className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
-          <p className="text-sm text-slate-500">업무</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-[-.03em]">
-            해야 할 일을 상태별로 확인하세요
-          </h1>
-          <p className="mt-2 text-sm text-slate-500">
-            행을 열면 요구사항 확인과 제출까지 이어서 할 수 있어요.
-          </p>
+          <h1 className="text-2xl font-bold tracking-[-.03em]">업무</h1>
         </div>
         {canCreate && (
           <Button onClick={() => setOpen(true)}>
@@ -158,11 +170,11 @@ export default function TasksPage() {
           </Button>
         )}
       </header>
-      <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row">
+      <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-end">
         <div className="max-w-md flex-1">
           <TextInput
             aria-label="업무 검색"
-            placeholder="업무 제목으로 찾기"
+            placeholder="업무 검색"
             value={query}
             onChange={event => setQuery(event.target.value)}
             className="[&>input]:pl-9"
@@ -172,19 +184,27 @@ export default function TasksPage() {
             size={16}
           />
         </div>
-        {canMove && (
-          <p className="text-xs leading-5 text-slate-500">
-            카드를 원하는 상태 칸으로 끌어 놓으면 상태가 바뀝니다.
-          </p>
-        )}
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={() => {
+            setShowCompleted(value => !value);
+            if (status === "DONE") setStatus("TODO");
+          }}
+          aria-expanded={showCompleted}
+          className="justify-start text-slate-500 md:justify-center"
+        >
+          <CheckCircle2 size={16} />
+          {showCompleted ? "완료 업무 숨기기" : `완료 업무 ${completedCount}건 보기`}
+        </Button>
       </div>
       {moveMessage && (
         <p className="mb-4 border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-[#17663d]">
           {moveMessage}
         </p>
       )}
-      <div className="hidden gap-5 xl:grid xl:grid-cols-5">
-        {columns.map(column => {
+      <div className={`hidden gap-5 xl:grid ${showCompleted ? "xl:grid-cols-3" : "xl:grid-cols-2"}`}>
+        {visibleColumns.map(column => {
           const items = shown.filter(task => task.status === column.status);
           const activeDrop = dragOver === column.status;
           return (
@@ -238,7 +258,7 @@ export default function TasksPage() {
       </div>
       <div className="xl:hidden">
         <div className="-mx-4 flex snap-x scroll-px-4 overflow-x-auto border-y border-slate-200 bg-white px-4 sm:mx-0 sm:px-0">
-          {columns.map(column => (
+          {visibleColumns.map(column => (
             <button
               key={column.status}
               onClick={() => setStatus(column.status)}
@@ -291,6 +311,23 @@ export default function TasksPage() {
             required
             placeholder="예: 축제 무대 순서 최종 확인"
           />
+          <SelectField
+            label="업무 카테고리"
+            value={form.type}
+            onChange={event =>
+              setForm({ ...form, type: event.target.value as TaskType })
+            }
+            required
+          >
+            <option value="SIMPLE">일반 업무 — 끝나면 완료 처리</option>
+            <option value="SUBMISSION">파일 제출 — 올리면 바로 완료</option>
+            <option value="TEAM_FORMATION">자동 조 편성 — 편성 후 바로 저장</option>
+          </SelectField>
+          {form.type === "TEAM_FORMATION" && (
+            <p className="-mt-2 border-l-2 border-[#2563a8] pl-3 text-xs leading-5 text-slate-600">
+              만든 업무를 열면 참여 인원과 조 개수를 골라 자동 편성할 수 있어요.
+            </p>
+          )}
           <TextArea
             label="업무 설명"
             value={form.description}

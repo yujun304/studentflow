@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -14,6 +14,7 @@ from app.models.entities import (
     DecisionCard,
     DecisionStatus,
     Event,
+    EventCompletionRecord,
     EventParticipant,
     EventRunItem,
     HandoverGuide,
@@ -33,13 +34,17 @@ from app.schemas import (
     DecisionCardIn,
     DecisionCardOut,
     DecisionCardStatusIn,
+    EventCompletionRecordIn,
+    EventCompletionRecordOut,
     EventRunItemIn,
     EventRunItemOut,
     EventRunItemStatusIn,
+    EventRunItemsReorderIn,
     HandoverGuideIn,
     HandoverGuideOut,
     MapAssignmentIn,
     MapAssignmentOut,
+    MapAssignmentPositionIn,
     SchoolMapOut,
 )
 from app.services.notifications import create_notifications
@@ -274,7 +279,7 @@ async def list_run_items(
             await db.scalars(
                 select(EventRunItem)
                 .where(EventRunItem.event_id == event_id)
-                .order_by(EventRunItem.planned_at, EventRunItem.sequence)
+                .order_by(EventRunItem.sequence, EventRunItem.planned_at)
             )
         ).all()
     )
@@ -293,8 +298,19 @@ async def create_run_item(
         assignee = await db.get(User, data.assignee_id)
         if not assignee or assignee.term_id != actor.term_id or not assignee.is_active:
             raise AppError(422, "invalid_assignee", "현재 기수의 활성 담당자를 선택해 주세요.")
+    values = data.model_dump(exclude={"sequence"})
+    next_sequence = (
+        await db.scalar(
+            select(func.max(EventRunItem.sequence)).where(EventRunItem.event_id == event_id)
+        )
+        or 0
+    ) + 1
     item = EventRunItem(
-        **data.model_dump(), event_id=event_id, created_by=actor.id, updated_by=actor.id
+        **values,
+        sequence=data.sequence if data.sequence > 0 else next_sequence,
+        event_id=event_id,
+        created_by=actor.id,
+        updated_by=actor.id,
     )
     db.add(item)
     await db.commit()
@@ -333,6 +349,150 @@ async def update_run_item_status(
     return await run_item_out(db, item, user)
 
 
+@router.put("/events/{event_id}/run-items/reorder", response_model=list[EventRunItemOut])
+async def reorder_run_items(
+    event_id: uuid.UUID,
+    data: EventRunItemsReorderIn,
+    actor: User = Depends(manager),
+    db: AsyncSession = Depends(get_db),
+):
+    await event_for_manager(db, event_id, actor)
+    items = list(
+        (
+            await db.scalars(
+                select(EventRunItem).where(EventRunItem.event_id == event_id)
+            )
+        ).all()
+    )
+    existing = {item.id: item for item in items}
+    if len(data.item_ids) != len(set(data.item_ids)) or set(data.item_ids) != set(existing):
+        raise AppError(
+            422,
+            "invalid_run_item_order",
+            "현재 행사의 모든 운영 항목을 중복 없이 포함해야 합니다.",
+        )
+    for sequence, item_id in enumerate(data.item_ids, start=1):
+        existing[item_id].sequence = sequence
+        existing[item_id].updated_by = actor.id
+    await db.commit()
+    ordered = [existing[item_id] for item_id in data.item_ids]
+    return [await run_item_out(db, item, actor) for item in ordered]
+
+
+async def completion_out(
+    db: AsyncSession, record: EventCompletionRecord, user: User
+) -> EventCompletionRecordOut:
+    event = await db.get(Event, record.event_id)
+    return EventCompletionRecordOut.model_validate(record).model_copy(
+        update={
+            "event_title": event.title if event else "삭제된 행사",
+            "can_manage": bool(event and can_manage_event(user, event)),
+        }
+    )
+
+
+@router.get("/completion-records", response_model=list[EventCompletionRecordOut])
+async def list_completion_records(
+    user: User = Depends(current_user), db: AsyncSession = Depends(get_db)
+):
+    event_ids = select(Event.id).where(Event.term_id == user.term_id)
+    if user.role == Role.MEMBER:
+        event_ids = event_ids.where(
+            Event.id.in_(
+                select(EventParticipant.event_id).where(
+                    EventParticipant.user_id == user.id
+                )
+            )
+        )
+    elif user.role == Role.DEPARTMENT_HEAD:
+        event_ids = event_ids.where(Event.department_id == user.department_id)
+    records = list(
+        (
+            await db.scalars(
+                select(EventCompletionRecord)
+                .where(EventCompletionRecord.event_id.in_(event_ids))
+                .order_by(EventCompletionRecord.completed_at.desc())
+            )
+        ).all()
+    )
+    return [await completion_out(db, record, user) for record in records]
+
+
+@router.get(
+    "/events/{event_id}/completion", response_model=EventCompletionRecordOut
+)
+async def get_event_completion(
+    event_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    event = await db.get(Event, event_id)
+    if not event or not await event_visible(db, event, user):
+        raise AppError(404, "event_not_found", "행사를 찾을 수 없습니다.")
+    record = await db.scalar(
+        select(EventCompletionRecord).where(EventCompletionRecord.event_id == event_id)
+    )
+    if not record:
+        raise AppError(404, "completion_not_found", "완료 기록이 아직 없습니다.")
+    return await completion_out(db, record, user)
+
+
+@router.put(
+    "/events/{event_id}/completion", response_model=EventCompletionRecordOut
+)
+async def save_event_completion(
+    event_id: uuid.UUID,
+    data: EventCompletionRecordIn,
+    actor: User = Depends(manager),
+    db: AsyncSession = Depends(get_db),
+):
+    event = await event_for_manager(db, event_id, actor)
+    record = await db.scalar(
+        select(EventCompletionRecord).where(EventCompletionRecord.event_id == event_id)
+    )
+    values = data.model_dump(exclude={"create_handover_draft"})
+    if record:
+        for key, value in values.items():
+            setattr(record, key, value)
+    else:
+        record = EventCompletionRecord(
+            **values, event_id=event_id, created_by=actor.id
+        )
+        db.add(record)
+        await db.flush()
+
+    if data.create_handover_draft:
+        guide = (
+            await db.get(HandoverGuide, record.handover_guide_id)
+            if record.handover_guide_id
+            else None
+        )
+        if not guide:
+            guide = HandoverGuide(
+                term_id=actor.term_id,
+                event_id=event.id,
+                title=f"{event.title} 인수인계",
+                summary=data.summary,
+                what_worked=data.outcomes,
+                pitfalls=data.incidents,
+                checklist=data.recommendations,
+                created_by=actor.id,
+            )
+            db.add(guide)
+            await db.flush()
+            record.handover_guide_id = guide.id
+        elif guide.published_at is None:
+            guide.summary = data.summary
+            guide.what_worked = data.outcomes
+            guide.pitfalls = data.incidents
+            guide.checklist = data.recommendations
+
+    event.status = "COMPLETED"
+    await db.commit()
+    await db.refresh(record)
+    return await completion_out(db, record, actor)
+
+
 async def school_map_out(item: SchoolMap, user: User, event: Event | None) -> SchoolMapOut:
     return SchoolMapOut.model_validate(item).model_copy(
         update={
@@ -358,7 +518,15 @@ async def list_maps(
                 select(MapAssignment.map_id).where(MapAssignment.user_id == user.id)
             )
         )
-    maps = list((await db.scalars(statement.order_by(SchoolMap.created_at.desc()))).all())
+    maps = list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    SchoolMap.event_id, SchoolMap.floor_order, SchoolMap.created_at
+                )
+            )
+        ).all()
+    )
     output = []
     for item in maps:
         event = await db.get(Event, item.event_id) if item.event_id else None
@@ -369,6 +537,8 @@ async def list_maps(
 @router.post("/maps", response_model=SchoolMapOut, status_code=201)
 async def upload_map(
     title: str = Form(..., min_length=1, max_length=200),
+    floor_label: str = Form("1층", min_length=1, max_length=80),
+    floor_order: int = Form(0, ge=0),
     event_id: uuid.UUID = Form(...),
     upload: UploadFile = File(...),
     actor: User = Depends(manager),
@@ -391,6 +561,8 @@ async def upload_map(
         term_id=actor.term_id,
         event_id=event_id,
         title=title,
+        floor_label=floor_label,
+        floor_order=floor_order,
         file_id=stored.id,
         created_by=actor.id,
     )
@@ -479,6 +651,27 @@ async def create_map_assignment(
             target_type="event" if event else "map",
             target_id=event.id if event else map_id,
         )
+    return await assignment_out(db, assignment, actor, True)
+
+
+@router.patch(
+    "/map-assignments/{assignment_id}/position", response_model=MapAssignmentOut
+)
+async def update_map_assignment_position(
+    assignment_id: uuid.UUID,
+    data: MapAssignmentPositionIn,
+    actor: User = Depends(manager),
+    db: AsyncSession = Depends(get_db),
+):
+    assignment = await db.get(MapAssignment, assignment_id)
+    if not assignment:
+        raise AppError(404, "assignment_not_found", "위치 배정을 찾을 수 없습니다.")
+    _, _, manage = await map_access(db, assignment.map_id, actor)
+    if not manage:
+        raise AppError(403, "map_forbidden", "지도 위치를 수정할 권한이 없습니다.")
+    assignment.x_ratio = data.x_ratio
+    assignment.y_ratio = data.y_ratio
+    await db.commit()
     return await assignment_out(db, assignment, actor, True)
 
 

@@ -3,21 +3,25 @@ import {
   ArrowRight,
   CalendarDays,
   ClipboardCheck,
-  Megaphone,
-  TriangleAlert,
+  FileText,
+  Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
-import { Link } from "wouter";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Link } from "@/components/MpaLink";
 import { useApp } from "@/contexts/AppContext";
-import { roles } from "@/lib/sample-data";
-import { AppModal, Avatar, Button, StatusBadge } from "@/components/primitives";
+import { AppModal, Button, StatusBadge } from "@/components/primitives";
+import { api, ApiError, jsonBody } from "@/lib/api";
+
+type QuickMemo = {
+  id: string;
+  content: string;
+  created_at: string;
+};
 
 const statusLabel = {
   TODO: "해야 할 일",
   IN_PROGRESS: "진행 중",
-  IN_REVIEW: "검토 중",
   DONE: "완료",
-  REJECTED: "반려",
 } as const;
 const dayMeta = [
   { day: "금", date: "14", key: "2026-08-14" },
@@ -38,7 +42,7 @@ type ScheduleItem = {
   href: string;
 };
 const typeStatus = {
-  행사: "예정",
+  행사: "진행 행사",
   업무: "해야 할 일",
   공지: "모집 중",
 } as const;
@@ -56,25 +60,20 @@ function WeekCalendar({
   onSelect: (key: string) => void;
 }) {
   return (
-    <section className="mt-7 border-t-2 border-[#2563a8] bg-white">
-      <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-4 py-3 sm:px-5">
+    <section className="mt-10">
+      <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-3">
         <div className="flex items-center gap-2">
           <CalendarDays size={18} className="text-[#2563a8]" />
-          <div>
-            <h2 className="font-bold">이번 주 일정</h2>
-            <p className="mt-0.5 text-xs text-slate-500">
-              날짜를 누르면 그날의 일정을 볼 수 있어요.
-            </p>
-          </div>
+          <h2 className="font-bold">이번 주</h2>
         </div>
         <Link
           href="/calendar"
           className="shrink-0 text-sm font-semibold text-[#2563a8] hover:underline"
         >
-          월간 보기
+          전체
         </Link>
       </div>
-      <div className="grid grid-cols-7">
+      <div className="grid grid-cols-7 border-b border-slate-200">
         {dayMeta.map((item, index) => {
           const dayItems = items.filter(
             schedule => schedule.dateKey === item.key
@@ -83,7 +82,7 @@ function WeekCalendar({
             <button
               key={item.key}
               onClick={() => onSelect(item.key)}
-              className={`min-h-[72px] border-r border-slate-100 px-2 py-2.5 text-left hover:bg-[#f8fbfe] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#2563a8] sm:min-h-[84px] sm:px-3 ${index === 0 ? "bg-[#f7fbff]" : ""}`}
+              className={`min-h-[72px] px-2 py-3 text-left hover:bg-[#f8fbfe] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#2563a8] sm:min-h-[84px] sm:px-3 ${index === 0 ? "bg-[#f7fbff]" : ""}`}
               aria-label={`${item.date}일 일정 ${dayItems.length}개 보기`}
             >
               <div className="flex items-baseline justify-between gap-1">
@@ -93,7 +92,7 @@ function WeekCalendar({
                   {item.day}
                 </span>
                 <span
-                  className={`text-lg font-bold ${index === 0 ? "grid h-7 w-7 place-items-center rounded-full bg-[#2563a8] text-white" : "text-slate-700"}`}
+                  className={`text-lg font-bold ${index === 0 ? "border-b-2 border-[#2563a8] text-slate-900" : "text-slate-700"}`}
                 >
                   {item.date}
                 </span>
@@ -119,51 +118,63 @@ function WeekCalendar({
   );
 }
 
-function ReviewQueue() {
-  const { submissions } = useApp();
-  const pending = submissions
-    .filter(submission => submission.status === "PENDING")
-    .slice(0, 2);
-  if (!pending.length) return null;
-  return (
-    <section className="mt-6 border-t-2 border-amber-500 bg-white">
-      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-5">
-        <div className="flex items-center gap-2">
-          <TriangleAlert size={18} className="text-amber-700" />
-          <h2 className="font-bold">검토 대기</h2>
-        </div>
-        <Link
-          href="/submissions"
-          className="text-sm font-semibold text-[#2563a8] hover:underline"
-        >
-          검토하기
-        </Link>
-      </div>
-      {pending.map(submission => (
-        <Link
-          href="/submissions"
-          key={submission.id}
-          className="flex items-center gap-3 border-b border-slate-100 px-4 py-3 hover:bg-[#f8fbfe] sm:px-5"
-        >
-          <Avatar label={submission.studentName} size="sm" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-slate-800">
-              {submission.taskTitle}
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              {submission.studentName} · {submission.submittedAt}
-            </p>
-          </div>
-          <StatusBadge label="검토 대기" />
-        </Link>
-      ))}
-    </section>
-  );
-}
-
 export default function DashboardPage() {
   const { currentRole, currentUser, tasks, events, announcements } = useApp();
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [memos, setMemos] = useState<QuickMemo[]>([]);
+  const [memoDraft, setMemoDraft] = useState("");
+  const [memoBusy, setMemoBusy] = useState(false);
+  const [memoLoading, setMemoLoading] = useState(true);
+  const [memoError, setMemoError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    api<QuickMemo[]>("/memos")
+      .then(items => {
+        if (!cancelled) setMemos(items);
+      })
+      .catch(error => {
+        if (!cancelled) {
+          setMemoError(error instanceof ApiError ? error.message : "메모를 불러오지 못했습니다.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setMemoLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function addMemo(event: FormEvent) {
+    event.preventDefault();
+    const content = memoDraft.trim();
+    if (!content || memoBusy) return;
+    setMemoBusy(true);
+    setMemoError("");
+    try {
+      const created = await api<QuickMemo>("/memos", {
+        method: "POST",
+        ...jsonBody({ content }),
+      });
+      setMemos(current => [created, ...current]);
+      setMemoDraft("");
+    } catch (error) {
+      setMemoError(error instanceof ApiError ? error.message : "메모를 저장하지 못했습니다.");
+    } finally {
+      setMemoBusy(false);
+    }
+  }
+
+  async function removeMemo(memoId: string) {
+    setMemoError("");
+    try {
+      await api(`/memos/${memoId}`, { method: "DELETE" });
+      setMemos(current => current.filter(memo => memo.id !== memoId));
+    } catch (error) {
+      setMemoError(error instanceof ApiError ? error.message : "메모를 삭제하지 못했습니다.");
+    }
+  }
   const scopedTasks =
     currentRole === "MEMBER"
       ? tasks.filter(task => task.assigneeId === currentUser.id)
@@ -171,10 +182,20 @@ export default function DashboardPage() {
         ? tasks.filter(task => task.department === currentUser.department)
         : tasks;
   const urgentTasks = scopedTasks
-    .filter(task => ["TODO", "IN_PROGRESS", "REJECTED"].includes(task.status))
+    .filter(task => ["TODO", "IN_PROGRESS"].includes(task.status))
     .slice(0, 3);
   const scheduleItems = useMemo<ScheduleItem[]>(
     () => [
+      ...events
+        .filter(event => event.dateKey)
+        .map(event => ({
+          id: `event-${event.id}`,
+          dateKey: event.dateKey!,
+          type: "행사" as const,
+          title: event.title,
+          meta: `${event.time} · ${event.location}`,
+          href: `/events/${event.id}`,
+        })),
       ...tasks
         .filter(task => task.status !== "DONE")
         .map(task => ({
@@ -185,17 +206,6 @@ export default function DashboardPage() {
           meta: `마감 ${task.dueDate.slice(11)} · ${task.department}`,
           href: `/tasks/${task.id}`,
         })),
-      ...events.map(event => {
-        const match = event.date.match(/(\d+)월\s*(\d+)일/);
-        return {
-          id: `event-${event.id}`,
-          dateKey: `2026-08-${String(Number(match?.[2] ?? 1)).padStart(2, "0")}`,
-          type: "행사" as const,
-          title: event.title,
-          meta: `${event.time} · ${event.location}`,
-          href: `/events/${event.id}`,
-        };
-      }),
       ...announcements
         .filter(announcement => announcement.pinned || announcement.application)
         .map(announcement => ({
@@ -214,12 +224,9 @@ export default function DashboardPage() {
   const selectedItems = selectedDate
     ? scheduleItems.filter(item => item.dateKey === selectedDate)
     : [];
-  const nextEvent = events[0];
-  const importantAnnouncement =
-    announcements.find(announcement => announcement.pinned) ?? announcements[0];
   return (
     <div className="mx-auto max-w-[1120px] px-4 py-7 sm:px-6 lg:px-8">
-      <header className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+      <header className="mb-9">
         <div>
           <p className="text-sm text-slate-500">
             {new Intl.DateTimeFormat("ko-KR", { dateStyle: "full" }).format(
@@ -227,123 +234,98 @@ export default function DashboardPage() {
             )}
           </p>
           <h1 className="mt-1 text-2xl font-bold tracking-[-.03em] text-slate-900">
-            {currentUser.name}님, 오늘 확인할 일
+            {currentUser.name}님의 오늘
           </h1>
-          <p className="mt-2 text-sm text-slate-500">
-            {roles[currentRole]} · {currentUser.department}
-          </p>
         </div>
-        <Link href="/tasks">
-          <Button variant="secondary">
-            <ArrowRight size={17} />
-            업무 전체 보기
-          </Button>
-        </Link>
       </header>
-      <section className="border-y border-slate-200 bg-white">
-        <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-4 py-3 sm:px-5">
+      <section className="mb-9" aria-labelledby="quick-memo-title">
+        <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+          <FileText size={18} className="text-[#2563a8]" />
+          <h2 id="quick-memo-title" className="font-bold">빠른 메모</h2>
+        </div>
+        <form onSubmit={addMemo} className="flex flex-col gap-2 py-3 sm:flex-row">
+          <label htmlFor="quick-memo" className="sr-only">메모 내용</label>
+          <input
+            id="quick-memo"
+            value={memoDraft}
+            onChange={event => setMemoDraft(event.target.value)}
+            maxLength={2000}
+            placeholder="잊지 말아야 할 내용을 적어 두세요."
+            className="min-h-10 flex-1 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#2563a8] focus:ring-2 focus:ring-[#2563a8]/15"
+          />
+          <Button type="submit" disabled={!memoDraft.trim() || memoBusy}>
+            {memoBusy ? "저장 중" : "메모 추가"}
+          </Button>
+        </form>
+        {memoError && <p role="alert" className="pb-2 text-sm text-[#a12622]">{memoError}</p>}
+        {memoLoading ? (
+          <p className="py-4 text-sm text-slate-500">메모를 불러오는 중입니다.</p>
+        ) : memos.length ? (
+          <ul className="divide-y divide-slate-100 border-t border-slate-100">
+            {memos.slice(0, 5).map(memo => (
+              <li key={memo.id} className="flex items-start gap-3 py-3">
+                <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
+                  {memo.content}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void removeMemo(memo.id)}
+                  className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#a12622] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563a8]"
+                  aria-label={`${memo.content.slice(0, 20)} 메모 삭제`}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="border-t border-slate-100 py-4 text-sm text-slate-500">저장한 메모가 없습니다.</p>
+        )}
+      </section>
+      <section>
+        <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-3">
           <div className="flex items-center gap-2">
             <ClipboardCheck size={18} className="text-[#2563a8]" />
-            <h2 className="font-bold">오늘 처리할 업무</h2>
+            <h2 className="font-bold">지금 할 일</h2>
           </div>
           <Link
             href="/tasks"
             className="text-sm font-semibold text-[#2563a8] hover:underline"
           >
-            업무로 이동
+            전체
           </Link>
         </div>
         <div className="divide-y divide-slate-100">
-          {urgentTasks.map(task => (
-            <Link
-              href={`/tasks/${task.id}`}
-              key={task.id}
-              className="group flex items-center gap-3 px-4 py-4 hover:bg-[#f8fbfe] sm:px-5"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold text-slate-800 group-hover:text-[#1f528b]">
-                  {task.title}
-                </p>
-                <p className="mt-1 text-sm text-slate-500">
-                  마감 {task.dueDate}
-                  {task.status === "REJECTED" ? " · 수정 후 다시 제출" : ""}
-                </p>
-              </div>
-              <StatusBadge label={statusLabel[task.status]} />
-              <ArrowRight
-                size={17}
-                className="hidden text-slate-400 sm:block"
-              />
-            </Link>
-          ))}
+          {urgentTasks.length ? (
+            urgentTasks.map(task => (
+              <Link
+                href={`/tasks/${task.id}`}
+                key={task.id}
+                className="group flex items-center gap-3 py-4 hover:bg-[#f8fbfe]"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-slate-800 group-hover:text-[#1f528b]">
+                    {task.title}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {task.dueDate.slice(0, 10)} 마감
+                  </p>
+                </div>
+                <StatusBadge label={statusLabel[task.status]} />
+                <ArrowRight
+                  size={17}
+                  className="hidden text-slate-400 sm:block"
+                />
+              </Link>
+            ))
+          ) : (
+            <p className="px-4 py-8 text-center text-sm text-slate-500">
+              지금 처리할 업무가 없어요.
+            </p>
+          )}
         </div>
       </section>
       <WeekCalendar items={scheduleItems} onSelect={setSelectedDate} />
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <section className="border-t-2 border-slate-700 bg-white">
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-            <h2 className="font-bold">다음 행사</h2>
-            <Link
-              href="/events"
-              className="text-sm font-semibold text-[#2563a8] hover:underline"
-            >
-              행사 보기
-            </Link>
-          </div>
-          {nextEvent && (
-            <Link
-              href="/events"
-              className="flex items-center gap-3 px-4 py-4 hover:bg-[#f8fbfe]"
-            >
-              <div className="grid h-10 w-10 shrink-0 place-items-center border border-slate-200 bg-slate-50 text-center">
-                <b className="text-xs text-[#2563a8]">
-                  {nextEvent.date.split(" ")[0]}
-                </b>
-                <span className="-mt-2 text-[10px] text-slate-500">
-                  {nextEvent.date.split(" ")[1]}
-                </span>
-              </div>
-              <div className="min-w-0">
-                <p className="font-semibold text-slate-800">
-                  {nextEvent.title}
-                </p>
-                <p className="mt-1 text-sm text-slate-500">
-                  {nextEvent.time} · {nextEvent.location}
-                </p>
-              </div>
-            </Link>
-          )}
-        </section>
-        <section className="border-t-2 border-[#2563a8] bg-white">
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-            <div className="flex items-center gap-2">
-              <Megaphone size={18} className="text-[#2563a8]" />
-              <h2 className="font-bold">중요 공지</h2>
-            </div>
-            <Link
-              href="/announcements"
-              className="text-sm font-semibold text-[#2563a8] hover:underline"
-            >
-              전체 보기
-            </Link>
-          </div>
-          {importantAnnouncement && (
-            <Link
-              href="/announcements"
-              className="block px-4 py-4 hover:bg-[#f8fbfe]"
-            >
-              <p className="text-sm font-semibold leading-6 text-slate-800">
-                {importantAnnouncement.title}
-              </p>
-              <p className="mt-1.5 text-xs text-slate-500">
-                {importantAnnouncement.author} ·{" "}
-                {importantAnnouncement.createdAt}
-              </p>
-            </Link>
-          )}
-        </section>
-      </div>
-      {currentRole !== "MEMBER" && <ReviewQueue />}
       <AppModal
         open={Boolean(selectedDate)}
         title={

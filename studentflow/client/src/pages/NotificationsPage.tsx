@@ -1,7 +1,7 @@
 /** StudentFlow | 인앱 알림 확인, 브라우저 푸시 설정, 권한 범위 내 알림 전송을 한 화면에서 처리한다. */
 import { Bell, BellOff, BellRing, CheckCheck, ChevronRight, Plus, Send } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "wouter";
+import { Link } from "@/components/MpaLink";
 import { useApp } from "@/contexts/AppContext";
 import { disablePush, enablePush, getPushState, type PushState } from "@/lib/push";
 import { AppModal, Button, EmptyState, SaveMessage, SelectField, TextArea, TextInput } from "@/components/primitives";
@@ -12,7 +12,7 @@ const pushCopy: Record<PushState, { title: string; description: string }> = {
   unconfigured: { title: "푸시 서버 설정이 필요해요", description: "관리자가 VAPID 키를 설정하면 이 기기에서 알림을 받을 수 있어요." },
   denied: { title: "브라우저 알림이 차단되어 있어요", description: "브라우저 사이트 설정에서 알림 권한을 허용해 주세요." },
   available: { title: "이 기기에서 푸시 알림 받기", description: "새 업무와 공지가 생기면 앱을 열지 않아도 알려드려요." },
-  enabled: { title: "이 기기에서 푸시 알림을 받고 있어요", description: "새 업무, 검토 결과와 중요 공지를 바로 알려드려요." },
+  enabled: { title: "이 기기에서 푸시 알림을 받고 있어요", description: "새 업무와 중요 공지를 바로 알려드려요." },
 };
 
 export default function NotificationsPage() {
@@ -87,16 +87,15 @@ export default function NotificationsPage() {
     <div className="mx-auto max-w-[900px] px-4 py-7 sm:px-6 lg:px-8">
       <header className="mb-6 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
         <div>
-          <p className="text-sm text-slate-500">알림</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-[-.03em]">확인할 알림 {unread.length}개</h1>
-          <p className="mt-2 text-sm text-slate-500">새 업무, 검토 결과와 중요 공지를 한곳에서 확인하세요.</p>
+          <h1 className="text-2xl font-bold tracking-[-.03em]">알림</h1>
+          {unread.length > 0 && <p className="mt-1 text-sm font-semibold text-[#2563a8]">읽지 않음 {unread.length}</p>}
         </div>
         {canSend && <Button className="w-full sm:w-auto" onClick={() => { setSent(false); setComposeOpen(true); }}><Plus size={17} />알림 보내기</Button>}
       </header>
 
       {sent && <SaveMessage>알림을 저장하고 수신자의 등록된 기기로 전송했습니다.</SaveMessage>}
 
-      <section className="mt-4 border border-slate-200 bg-white p-4 sm:flex sm:items-center sm:justify-between sm:gap-5">
+      <section className="mt-4 border-y border-slate-200 py-4 sm:flex sm:items-center sm:justify-between sm:gap-5">
         <div className="flex gap-3">
           <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${pushState === "enabled" ? "bg-[#e8f0f8] text-[#2563a8]" : "bg-slate-100 text-slate-500"}`}>
             {pushState === "enabled" ? <BellRing size={19} /> : pushState === "denied" || pushState === "unsupported" ? <BellOff size={19} /> : <Bell size={19} />}
@@ -120,7 +119,7 @@ export default function NotificationsPage() {
       </div>
 
       {notices.length ? (
-        <section className="border border-slate-200 bg-white">
+        <section className="border-y border-slate-200">
           <div className="divide-y divide-slate-100">
             {notices.map(notice => (
               <Link
@@ -143,7 +142,7 @@ export default function NotificationsPage() {
             ))}
           </div>
         </section>
-      ) : <EmptyState title="새 알림이 없어요." description="새 업무나 검토 결과가 생기면 이곳에 표시됩니다." />}
+      ) : <EmptyState title="새 알림이 없어요." description="새 업무나 중요 공지가 생기면 이곳에 표시됩니다." />}
 
       <AppModal
         open={composeOpen}
@@ -155,7 +154,7 @@ export default function NotificationsPage() {
         <form id="send-notification" className="grid gap-4" onSubmit={submitNotification}>
           <SelectField label="수신 대상" value={recipient} onChange={event => setRecipient(event.target.value)}>
             <option value="all">관리 범위 전체 ({recipients.length}명)</option>
-            {recipients.map(user => <option key={user.id} value={user.id}>{user.name} · {user.department}</option>)}
+            {recipients.map(user => <option key={user.id} value={user.id}>{user.name} · {[user.grade, user.department].filter(Boolean).join(" · ")}</option>)}
           </SelectField>
           <TextInput label="알림 제목" value={form.title} onChange={event => { setForm({ ...form, title: event.target.value }); setFormError(""); }} required error={formError} placeholder="예: 축제 운영표가 변경되었습니다" />
           <TextArea label="알림 내용" value={form.content} onChange={event => setForm({ ...form, content: event.target.value })} placeholder="받는 사람이 바로 이해할 수 있도록 다음 행동을 적어 주세요." />

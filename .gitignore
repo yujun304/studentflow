@@ -9,3 +9,6 @@ dist/
 .data/
 htmlcov/
 .coverage
+.idea/
+.pnpm-store/
+non-essential/

@@ -1,22 +1,4 @@
-from fastapi.testclient import TestClient
-
-from app.core.security import current_user
-from app.main import api, app
-from app.models.entities import Role, User
-
-
-def fake_user() -> User:
-    import uuid
-
-    return User(
-        id=uuid.uuid4(),
-        email="teacher@example.com",
-        name="선생님",
-        password_hash="unused",
-        role=Role.TEACHER,
-        term_id=uuid.uuid4(),
-        is_active=True,
-    )
+from app.main import api
 
 
 def test_followup_contracts_are_in_openapi():
@@ -34,19 +16,7 @@ def test_followup_contracts_are_in_openapi():
         "/operations/decisions",
         "/operations/handovers",
         "/operations/maps",
+        "/operations/completion-records",
+        "/operations/events/{event_id}/completion",
     }
     assert expected <= set(paths)
-
-
-def test_pending_contract_returns_clear_501():
-    api.dependency_overrides[current_user] = fake_user
-    try:
-        with TestClient(app) as client:
-            response = client.get(
-                "/api/v1/comments",
-                params={"target_type": "task", "target_id": "00000000-0000-0000-0000-000000000001"},
-            )
-        assert response.status_code == 501
-        assert response.json()["code"] == "feature_not_ready"
-    finally:
-        api.dependency_overrides.clear()

@@ -9,12 +9,14 @@ from app.api import (
     auth,
     calendar,
     comments,
+    community,
     dashboard,
     events,
     meeting_records,
     notices,
     notifications,
     operations,
+    proposals,
     reminders,
     tasks,
     teams,
@@ -46,6 +48,8 @@ api.include_router(teams.router)
 api.include_router(attendance.router)
 api.include_router(meeting_records.router)
 api.include_router(comments.router)
+api.include_router(community.router)
+api.include_router(proposals.router)
 api.include_router(reminders.router)
 api.include_router(notifications.router)
 api.include_router(operations.router)
