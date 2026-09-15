@@ -76,9 +76,9 @@ Docker는 애플리케이션 기능을 구현하는 도구가 아니라, 개발�
 
 | 컨테이너 | 역할 | 호스트 공개 여부 |
 |---|---|---|
-| `postgres` | PostgreSQL 16 데이터베이스 | 개발 편의를 위해 `5432` 공개 |
+| `postgres` | PostgreSQL 16 데이터베이스 | 호스트에 직접 공개하지 않음 |
 | `backend` | Alembic 마이그레이션 실행 후 FastAPI 시작 | 직접 공개하지 않음 |
-| `frontend` | React 정적 파일 제공 및 API 프록시 | `8081` 공개 |
+| `frontend` | React 정적 파일 제공 및 API 프록시 | 호스트의 `127.0.0.1:8081`에만 바인딩 |
 
 구체적인 사용처는 다음과 같습니다.
 
@@ -90,6 +90,7 @@ Docker는 애플리케이션 기능을 구현하는 도구가 아니라, 개발�
 6. **시작 순서 관리**: PostgreSQL healthcheck 성공 후 backend를 시작합니다.
 7. **데이터 보존**: `studentflow_postgres`에는 DB를, `studentflow_uploads`에는 파일을 저장해 컨테이너를 다시 만들어도 데이터가 유지됩니다.
 8. **한 명령 실행**: `docker compose up -d --build`로 세 서비스를 빌드하고 실행합니다.
+9. **운영 서버 외부 진입점 제한**: 호스트 Nginx가 80/443을 받고 `127.0.0.1:8081`로 전달합니다. PostgreSQL과 FastAPI는 호스트 포트를 열지 않습니다.
 
 React 상태 관리, FastAPI 권한 검사, 업무·공지·출석 규칙은 일반 애플리케이션 코드이며 Docker가 처리하지 않습니다. Docker Compose는 현재 로컬 실행과 단일 서버 배포용이고 Kubernetes 같은 다중 서버 오케스트레이션은 사용하지 않습니다.
 

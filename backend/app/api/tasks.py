@@ -301,12 +301,20 @@ async def submit_team_formation(
                 (
                     item
                     for item in task.team_requirements
-                    if draft.name == item["name"] or draft.name.endswith(f" {item['name']}")
+                    if (draft.name == item["name"] or draft.name.endswith(f" {item['name']}"))
+                    and (
+                        "operation_dates" not in item
+                        or day_key in (item.get("operation_dates") or [])
+                    )
                 ),
                 None,
             )
             if not requirement:
-                raise AppError(422, "unknown_team", f"{draft.name}은 기획서에 없는 조입니다.")
+                raise AppError(
+                    422,
+                    "unknown_team",
+                    f"{draft.name}은 해당 날짜의 기획서에 없는 조입니다.",
+                )
             if len(member_ids) != requirement["people_count"]:
                 raise AppError(
                     422,
@@ -315,13 +323,20 @@ async def submit_team_formation(
                 )
             if (draft.role_description or "").strip() != requirement["role_description"].strip():
                 raise AppError(422, "invalid_team_role", "기획서에 적힌 조 역할은 변경할 수 없습니다.")
-        if len(teams_by_day) != task.operation_days or any(
-            count != len(task.team_requirements) for count in teams_by_day.values()
-        ):
+        expected_by_day = {
+            day: sum(
+                1
+                for item in task.team_requirements
+                if "operation_dates" not in item
+                or day in (item.get("operation_dates") or [])
+            )
+            for day in (task.operation_dates or teams_by_day)
+        }
+        if teams_by_day != expected_by_day:
             raise AppError(
                 422,
                 "invalid_team_schedule",
-                f"{task.operation_days}일 동안 하루 {len(task.team_requirements)}개 조를 편성해 주세요.",
+                "기획서에서 날짜별로 선택한 조를 모두 편성해 주세요.",
             )
         if task.operation_dates and set(teams_by_day) != set(task.operation_dates):
             raise AppError(422, "invalid_operation_dates", "기획서에서 선택한 날짜에 맞춰 편성해 주세요.")

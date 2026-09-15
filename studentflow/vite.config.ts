@@ -21,6 +21,7 @@ const documentInputs = [
   "users/index.html",
   "event-create/index.html",
   "tutorial/index.html",
+  "operations/index.html",
 ].map(document => path.resolve(clientRoot, document));
 
 const staticDocuments = new Map([
@@ -35,6 +36,7 @@ const staticDocuments = new Map([
   ["/users", "/users/index.html"],
   ["/event-create", "/event-create/index.html"],
   ["/tutorial", "/tutorial/index.html"],
+  ["/operations", "/operations/index.html"],
 ]);
 
 function mpaDevelopmentRoutes(): Plugin {
@@ -50,11 +52,11 @@ function mpaDevelopmentRoutes(): Plugin {
           ? "/tasks/detail.html"
           : /^\/proposals\/[^/]+$/.test(pathName)
             ? "/proposals/detail.html"
-          : /^\/announcements\/[^/]+$/.test(pathName)
-            ? "/announcements/detail.html"
-            : /^\/events\/[^/]+$/.test(pathName)
-              ? "/events/detail.html"
-              : undefined;
+            : /^\/announcements\/[^/]+$/.test(pathName)
+              ? "/announcements/detail.html"
+              : /^\/events\/[^/]+$/.test(pathName)
+                ? "/events/detail.html"
+                : undefined;
         const document = staticDocument ?? detailDocument;
         if (document) request.url = `${document}${url.search}`;
         next();

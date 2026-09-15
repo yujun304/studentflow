@@ -8,6 +8,7 @@ import AnnouncementsPage from "@/pages/AnnouncementsPage";
 import EventDetailPage from "@/pages/EventDetailPage";
 import LoginPage from "@/pages/LoginPage";
 import NotificationsPage from "@/pages/NotificationsPage";
+import OperationsPage from "@/pages/OperationsPage";
 import CalendarPage from "@/pages/CalendarPage";
 import CommunityPage from "@/pages/CommunityPage";
 import ProposalDetailPage from "@/pages/ProposalDetailPage";
@@ -34,6 +35,7 @@ const documentPages: Record<string, ComponentType> = {
   "/announcements": AnnouncementsPage,
   "/teams": TeamsPage,
   "/notifications": NotificationsPage,
+  "/operations": OperationsPage,
   "/users": UsersPage,
   "/event-create": TeacherEventCreatePage,
   "/tutorial": TutorialPage,
@@ -63,7 +65,7 @@ function DocumentRedirect({ to }: { to: string }) {
 }
 
 function DocumentRouter() {
-  const { authReady, signedIn } = useApp();
+  const { authReady, signedIn, onboardingRequired } = useApp();
   const path = currentDocumentPath();
 
   if (!authReady) return <LoadingDocument />;
@@ -75,6 +77,8 @@ function DocumentRouter() {
     );
   }
   if (path === "/login") return <DocumentRedirect to="/" />;
+  if (onboardingRequired && path === "/")
+    return <DocumentRedirect to="/tutorial" />;
 
   const Page = resolveDocumentPage(path);
   return Page ? (
@@ -94,13 +98,12 @@ function DocumentRouter() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        switchable
-      >
+      <ThemeProvider defaultTheme="light" switchable>
         <TooltipProvider>
           <Toaster />
-          <AppProvider><DocumentRouter /></AppProvider>
+          <AppProvider>
+            <DocumentRouter />
+          </AppProvider>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

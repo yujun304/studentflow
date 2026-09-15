@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -43,9 +43,14 @@ async def create_user(
 ):
     if await db.scalar(select(User.id).where(User.email == data.email.lower())):
         raise AppError(409, "email_exists", "이미 사용 중인 이메일입니다.")
+    if data.login_id and await db.scalar(
+        select(User.id).where(func.lower(User.login_id) == data.login_id.strip().lower())
+    ):
+        raise AppError(409, "login_id_exists", "이미 사용 중인 아이디입니다.")
     user = User(
-        **data.model_dump(exclude={"email", "password"}),
+        **data.model_dump(exclude={"email", "login_id", "password"}),
         email=data.email.lower(),
+        login_id=data.login_id.strip() if data.login_id else None,
         password_hash=hash_password(data.password),
     )
     db.add(user)
@@ -64,12 +69,20 @@ async def update_user(
     user = await db.get(User, user_id)
     if not user:
         raise AppError(404, "user_not_found", "사용자를 찾을 수 없습니다.")
+    if data.login_id:
+        duplicate = await db.scalar(
+            select(User.id).where(
+                func.lower(User.login_id) == data.login_id.strip().lower(), User.id != user.id
+            )
+        )
+        if duplicate:
+            raise AppError(409, "login_id_exists", "이미 사용 중인 아이디입니다.")
     changed_security = False
     for key, value in data.model_dump(exclude_unset=True, exclude={"password"}).items():
         changed_security |= (
             key in {"role", "is_active", "department_id"} and getattr(user, key) != value
         )
-        setattr(user, key, value)
+        setattr(user, key, value.strip() if key == "login_id" and value else value)
     if data.password:
         user.password_hash = hash_password(data.password)
         changed_security = True

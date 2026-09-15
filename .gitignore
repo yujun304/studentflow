@@ -12,3 +12,4 @@ htmlcov/
 .idea/
 .pnpm-store/
 non-essential/
+.codex-tmp/

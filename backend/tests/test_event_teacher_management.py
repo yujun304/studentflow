@@ -108,6 +108,13 @@ async def test_teacher_event_creation_assigns_complete_team_formation_task():
             "people_count": 1,
             "role_description": "정문 안내",
         }
+        assert task.formation_draft is not None
+        assert len(task.formation_draft) == 4
+        assert all(len(draft["member_ids"]) == 1 for draft in task.formation_draft)
+        assert {draft["leader_id"] for draft in task.formation_draft} == {
+            str(manager.id),
+            str(participant.id),
+        }
         assert await db.scalar(
             select(TaskAssignee.id).where(
                 TaskAssignee.task_id == task.id,

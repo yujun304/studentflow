@@ -28,6 +28,7 @@ from app.schemas import (
     TeacherEventCreateOut,
 )
 from app.services.notifications import create_notifications
+from app.services.team_formation_draft import build_team_formation_draft
 
 router = APIRouter(prefix="/events", tags=["events"], dependencies=[Depends(csrf_protect)])
 manager = require_roles(Role.DEPARTMENT_HEAD, Role.EXECUTIVE_BOARD, Role.TEACHER)
@@ -226,6 +227,7 @@ async def create_teacher_event(
     )
     db.add(task)
     await db.flush()
+    task.formation_draft = await build_team_formation_draft(db, task)
     db.add(TaskAssignee(task_id=task.id, user_id=manager.id))
     await db.commit()
 

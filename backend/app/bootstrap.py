@@ -87,6 +87,7 @@ async def seed_demo_data() -> None:
                     term_id=term.id,
                     grade=grade,
                     is_active=True,
+                    onboarding_completed_at=datetime.now(UTC),
                 )
                 db.add(user)
                 await db.flush()

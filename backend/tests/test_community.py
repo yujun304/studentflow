@@ -309,6 +309,17 @@ async def test_event_seed_board_supports_anonymity_stars_ranking_and_event_conve
         assert team_task.people_per_team == 3
         assert team_task.team_role_description == "참가자 확인과 이동 안내"
         assert team_task.team_requirements[1]["people_count"] == 3
+        assert team_task.formation_draft is not None
+        assert len(team_task.formation_draft) == 4
+        assert all(
+            draft["schedule_at"].startswith(("2026-10-16", "2026-10-17"))
+            for draft in team_task.formation_draft
+        )
+        assert str(teacher.id) not in {
+            member_id
+            for draft in team_task.formation_draft
+            for member_id in draft["member_ids"]
+        }
         assignees = set(
             (
                 await db.scalars(

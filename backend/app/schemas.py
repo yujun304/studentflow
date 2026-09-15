@@ -5,6 +5,7 @@ from typing import Generic, Literal, TypeVar
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.entities import (
+    ApplicationStatus,
     AttendanceStatus,
     DecisionStatus,
     EventType,
@@ -38,16 +39,36 @@ class LoginIn(BaseModel):
 class UserOut(ORMModel):
     id: uuid.UUID
     email: EmailStr
+    login_id: str | None = None
     name: str
     role: Role
     department_id: uuid.UUID | None
     term_id: uuid.UUID
     grade: int | None
     is_active: bool
+    onboarding_completed_at: datetime | None = None
+
+
+class TutorialStepOut(BaseModel):
+    key: str
+    title: str
+    description: str
+    href: str
+    action_label: str
+    done: bool
+
+
+class TutorialStatusOut(BaseModel):
+    started: bool
+    completed: bool
+    completed_count: int
+    total_count: int
+    steps: list[TutorialStepOut]
 
 
 class UserCreate(BaseModel):
     email: EmailStr
+    login_id: str | None = Field(default=None, min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=8)
     role: Role = Role.MEMBER
@@ -58,6 +79,7 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     name: str | None = None
+    login_id: str | None = Field(default=None, min_length=1, max_length=100)
     role: Role | None = None
     department_id: uuid.UUID | None = None
     grade: int | None = Field(default=None, ge=1, le=3)
@@ -162,6 +184,7 @@ class TaskOut(ORMModel):
     team_role_description: str | None = None
     team_requirements: list[dict] | None = None
     operation_dates: list[date] | None = None
+    formation_draft: list[dict] | None = None
     assigned_to_me: bool = False
     assignee_ids: list[uuid.UUID] = Field(default_factory=list)
     can_edit: bool = False
@@ -239,6 +262,9 @@ class NoticeOut(ORMModel):
     created_at: datetime
     recipient_ids: list[uuid.UUID] = Field(default_factory=list)
     can_edit: bool = False
+    read: bool = False
+    applied_count: int = 0
+    application_status: ApplicationStatus | None = None
 
 
 class NoticeUpdate(BaseModel):
@@ -417,6 +443,7 @@ class TeamRequirementIn(BaseModel):
     role_description: str = Field(max_length=500)
     start_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     end_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    operation_dates: list[date] | None = Field(default=None, max_length=30)
 
 
 class CommunityEventPlanFields(BaseModel):

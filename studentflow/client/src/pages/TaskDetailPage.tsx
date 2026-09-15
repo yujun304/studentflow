@@ -188,14 +188,7 @@ export default function TaskDetailPage() {
   }
 
   function openFormation() {
-    const plannedTeamCount = task.teamRequirements?.length ?? task.teamsPerDay ?? 2;
-    const requiredPeople = task.teamRequirements?.reduce((sum, team) => sum + team.peopleCount, 0)
-      ?? (task.peoplePerTeam ? plannedTeamCount * task.peoplePerTeam : eligiblePeople.length);
     const event = events.find(item => item.id === task.eventId);
-    const eventPeople = event?.participantIds?.length
-      ? eligiblePeople.filter(user => event.participantIds?.includes(user.id))
-      : eligiblePeople;
-    const plannedPeople = eventPeople.slice(0, requiredPeople);
     const start = event?.dateKey ? new Date(`${event.dateKey}T12:00:00`) : defaultFormationDate();
     const plannedDates = task.operationDates?.length
       ? task.operationDates.map(date => new Date(`${date}T12:00:00`))
@@ -204,18 +197,68 @@ export default function TaskDetailPage() {
           value.setDate(start.getDate() + index);
           return value;
         });
-    const ids = plannedPeople.map(user => user.id);
+    const plannedDateKeys = plannedDates.map(localDateKey);
+    const dailyRequirements = plannedDateKeys.map(date =>
+      task.teamRequirements?.filter(
+        team => team.operationDates === undefined || team.operationDates.includes(date)
+      ) ?? []
+    );
+    const plannedTeamCount = task.teamRequirements?.length
+      ? Math.max(...dailyRequirements.map(items => items.length), 1)
+      : task.teamsPerDay ?? 2;
+    const requiredPeople = task.teamRequirements?.length
+      ? Math.max(
+          ...dailyRequirements.map(items =>
+            items.reduce((sum, team) => sum + team.peopleCount, 0)
+          ),
+          1
+        )
+      : task.peoplePerTeam
+        ? plannedTeamCount * task.peoplePerTeam
+        : eligiblePeople.length;
+    const eventPeople = event?.participantIds?.length
+      ? eligiblePeople.filter(user => event.participantIds?.includes(user.id))
+      : eligiblePeople;
+    const plannedPeople = eventPeople.slice(0, requiredPeople);
+    const storedPreview = task.formationDraft?.map(draft => ({
+      name: draft.name,
+      dateIndex: Math.max(
+        0,
+        plannedDateKeys.findIndex(date => draft.scheduleAt.startsWith(date))
+      ),
+      scheduleAt: draft.scheduleAt,
+      leaderId: draft.leaderId ?? "",
+      members: draft.memberIds
+        .map(id => users.find(user => user.id === id))
+        .filter((user): user is (typeof users)[number] => Boolean(user)),
+      requiredPeople: draft.requiredPeople,
+      roleDescription: draft.roleDescription,
+    })) ?? [];
+    const ids = storedPreview.length
+      ? Array.from(
+          new Set(storedPreview.flatMap(team => team.members.map(member => member.id)))
+        )
+      : plannedPeople.map(user => user.id);
     setParticipantIds(ids);
     setTeamCount(plannedTeamCount);
     setSelectedDates(plannedDates);
-    const plan = createFormationPlan({
-      people: plannedPeople,
-      teamsPerDay: plannedTeamCount,
-      dates: plannedDates.map(localDateKey),
-      requirements: task.teamRequirements,
-    });
-    setTeamPreview(plan.teams);
-    setPlanWarnings(plan.warnings);
+    if (storedPreview.length) {
+      setTeamPreview(storedPreview);
+      setPlanWarnings(
+        storedPreview.some(team => team.members.length !== team.requiredPeople)
+          ? ["자동 편성안에 정원이 맞지 않는 조가 있어요. 참여자를 확인해 주세요."]
+          : []
+      );
+    } else {
+      const plan = createFormationPlan({
+        people: plannedPeople,
+        teamsPerDay: plannedTeamCount,
+        dates: plannedDateKeys,
+        requirements: task.teamRequirements,
+      });
+      setTeamPreview(plan.teams);
+      setPlanWarnings(plan.warnings);
+    }
     setFormationError("");
     setFormationOpen(true);
   }
@@ -422,11 +465,11 @@ export default function TaskDetailPage() {
       return (
         <>
           <p className="text-sm leading-6 text-slate-600">
-            날짜와 참여자를 확인한 뒤 조 편성을 저장하면 배정된 학생에게
-            알림과 개인 일정이 생성됩니다.
+            선생님 승인 후 자동으로 만든 편성안입니다. 담당자가 학생 배치와
+            조장을 확인·수정한 뒤 확정하면 알림과 개인 일정이 생성됩니다.
           </p>
           <Button onClick={openFormation} className="mt-4 w-full">
-            <UsersRound size={17} /> 편성 미리보기
+            <UsersRound size={17} /> 자동 편성안 확인·수정
           </Button>
         </>
       );
@@ -680,8 +723,8 @@ export default function TaskDetailPage() {
 
       <AppModal
         open={formationOpen}
-        title="날짜를 골라 조 편성"
-        description="자동 편성 결과를 확인하고 필요한 학생을 옮긴 뒤 저장하세요."
+        title="자동 편성안 확인·수정"
+        description="선생님 승인 후 생성된 초안입니다. 학생 배치와 조장을 확인한 뒤 최종 확정하세요."
         onClose={() => setFormationOpen(false)}
         size="xl"
         footer={
@@ -690,7 +733,7 @@ export default function TaskDetailPage() {
               취소
             </Button>
             <Button onClick={() => void handleFormationSubmit()} disabled={formationSaving}>
-              {formationSaving ? "저장 중…" : "조 편성 저장"}
+              {formationSaving ? "확정 중…" : "검토 완료 후 확정"}
               <Send size={16} />
             </Button>
           </>
@@ -724,8 +767,8 @@ export default function TaskDetailPage() {
                 {task.teamRequirements?.length ? (
                   <div className="rounded border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-700">
                     <p className="font-bold text-slate-900">기획서 편성 기준</p>
-                    <p>{task.operationDays}일 · 하루 {task.teamRequirements.length}개 조</p>
-                    {task.teamRequirements.map(team => <p key={team.name} className="mt-1"><strong>{team.name} · {team.peopleCount}명{team.startTime ? ` · ${team.startTime}${team.endTime ? `~${team.endTime}` : ""}` : ""}</strong> — {team.roleDescription}</p>)}
+                    <p>{task.operationDays}일 · 날짜별 운영 조</p>
+                    {task.teamRequirements.map(team => <p key={team.name} className="mt-1"><strong>{team.name} · {team.peopleCount}명{team.startTime ? ` · ${team.startTime}${team.endTime ? `~${team.endTime}` : ""}` : ""}</strong> — {team.roleDescription}<br /><span className="text-xs text-slate-500">{team.operationDates?.length ? team.operationDates.join(", ") : "모든 운영 날짜"}</span></p>)}
                   </div>
                 ) : task.peoplePerTeam && task.teamRoleDescription ? (
                   <div className="rounded border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-700">{task.operationDays}일 · 하루 {task.teamsPerDay}개 조 · 조당 {task.peoplePerTeam}명<br />역할: {task.teamRoleDescription}</div>
@@ -750,14 +793,22 @@ export default function TaskDetailPage() {
                 </SelectField>
                 <div className="border-t border-slate-200 pt-3 text-sm leading-6 text-slate-600">
                   <p className="font-semibold text-slate-800">
-                    {selectedDates.length}일 · 총{" "}
-                    {selectedDates.length * teamCount}개 조
+                    {selectedDates.length}일 · 총 {teamPreview.length}개 조
                   </p>
                   <p className="mt-1">
                     선택한 학생은 각 날짜에 한 번씩 배치돼요.
                   </p>
                   <p className="mt-1 font-semibold text-slate-800">
-                    하루 필요 {task.teamRequirements?.reduce((sum, item) => sum + item.peopleCount, 0) ?? selectedPeople.length}명 · 현재 선택 {selectedPeople.length}명
+                    하루 최대 필요 {task.teamRequirements?.length
+                      ? Math.max(
+                          ...selectedDates.map(date =>
+                            task.teamRequirements!
+                              .filter(team => team.operationDates === undefined || team.operationDates.includes(localDateKey(date)))
+                              .reduce((sum, item) => sum + item.peopleCount, 0)
+                          ),
+                          0
+                        )
+                      : selectedPeople.length}명 · 현재 선택 {selectedPeople.length}명
                   </p>
                 </div>
               </div>

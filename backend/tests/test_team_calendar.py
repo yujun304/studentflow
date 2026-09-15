@@ -14,6 +14,7 @@ from app.api.calendar import (
 )
 from app.api.tasks import submit_team_formation
 from app.core.database import Base
+from app.core.errors import AppError
 from app.models.entities import (
     CommunityPost,
     Event,
@@ -101,7 +102,12 @@ async def test_team_approval_creates_member_calendar_reminder_and_personal_items
             people_per_team=2,
             team_role_description="정문 안내",
             team_requirements=[
-                {"name": "안내 1조", "people_count": 2, "role_description": "정문 안내"}
+                {
+                    "name": "안내 1조",
+                    "people_count": 2,
+                    "role_description": "정문 안내",
+                    "operation_dates": ["2026-07-28"],
+                }
             ],
             created_by=teacher.id,
         )
@@ -178,6 +184,123 @@ async def test_team_approval_creates_member_calendar_reminder_and_personal_items
         assert edited.title == "개인 준비물 확인"
         await delete_calendar_item(personal_id, member, db)
         assert await db.get(Reminder, personal_id) is None
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_team_formation_uses_only_teams_selected_for_each_date():
+    engine = create_async_engine(
+        "sqlite+aiosqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
+    )
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with session_factory() as db:
+        term = Term(
+            name="날짜별 조 편성 테스트",
+            starts_on=date(2026, 1, 1),
+            ends_on=date(2026, 12, 31),
+            is_current=True,
+        )
+        db.add(term)
+        await db.flush()
+        first = User(
+            email="date-team-first@example.com",
+            name="첫날 담당",
+            password_hash="unused",
+            role=Role.MEMBER,
+            term_id=term.id,
+        )
+        second = User(
+            email="date-team-second@example.com",
+            name="둘째날 담당",
+            password_hash="unused",
+            role=Role.MEMBER,
+            term_id=term.id,
+        )
+        db.add_all([first, second])
+        await db.flush()
+        task = Task(
+            term_id=term.id,
+            title="날짜별 조 편성",
+            type=TaskType.TEAM_FORMATION,
+            status=TaskStatus.TODO,
+            operation_days=2,
+            operation_dates=["2026-09-25", "2026-09-26"],
+            teams_per_day=1,
+            people_per_team=1,
+            team_role_description="날짜별 운영",
+            team_requirements=[
+                {
+                    "name": "등교조",
+                    "people_count": 1,
+                    "role_description": "등교 안내",
+                    "operation_dates": ["2026-09-25"],
+                },
+                {
+                    "name": "정리조",
+                    "people_count": 1,
+                    "role_description": "행사 정리",
+                    "operation_dates": ["2026-09-26"],
+                },
+            ],
+            created_by=first.id,
+        )
+        db.add(task)
+        await db.flush()
+        db.add(TaskAssignee(task_id=task.id, user_id=first.id))
+        await db.commit()
+
+        with pytest.raises(AppError) as invalid:
+            await submit_team_formation(
+                task.id,
+                TeamFormationIn(
+                    content="잘못된 날짜",
+                    teams=[
+                        TeamDraftIn(
+                            name="정리조",
+                            role_description="행사 정리",
+                            leader_id=second.id,
+                            member_ids=[second.id],
+                            schedule_at=datetime(2026, 9, 25, 1, tzinfo=UTC),
+                        )
+                    ],
+                ),
+                first,
+                db,
+            )
+        assert invalid.value.code == "unknown_team"
+
+        version = await submit_team_formation(
+            task.id,
+            TeamFormationIn(
+                content="날짜별 조 편성안",
+                teams=[
+                    TeamDraftIn(
+                        name="9월 25일 등교조",
+                        role_description="등교 안내",
+                        leader_id=first.id,
+                        member_ids=[first.id],
+                        schedule_at=datetime(2026, 9, 25, 1, tzinfo=UTC),
+                    ),
+                    TeamDraftIn(
+                        name="9월 26일 정리조",
+                        role_description="행사 정리",
+                        leader_id=second.id,
+                        member_ids=[second.id],
+                        schedule_at=datetime(2026, 9, 26, 1, tzinfo=UTC),
+                    ),
+                ],
+            ),
+            first,
+            db,
+        )
+
+        assert version.id is not None
+        saved = list((await db.scalars(select(Team).where(Team.task_id == task.id))).all())
+        assert {team.name for team in saved} == {"9월 25일 등교조", "9월 26일 정리조"}
 
     await engine.dispose()
 

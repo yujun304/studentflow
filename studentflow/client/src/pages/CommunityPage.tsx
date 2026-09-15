@@ -54,7 +54,12 @@ type EventPlanForm = {
   teams_per_day: number;
   people_per_team: number;
   team_role_description: string;
-  team_requirements: Array<{ name: string; people_count: number; role_description: string }>;
+  team_requirements: Array<{
+    name: string;
+    people_count: number;
+    role_description: string;
+    operation_dates?: string[];
+  }>;
   team_manager_id: string;
   poster_manager_id: string;
   poster_required: boolean;
@@ -152,8 +157,8 @@ const emptyPlanForm: EventPlanForm = {
   people_per_team: 3,
   team_role_description: "",
   team_requirements: [
-    { name: "1조", people_count: 3, role_description: "" },
-    { name: "2조", people_count: 3, role_description: "" },
+    { name: "1조", people_count: 3, role_description: "", operation_dates: [] },
+    { name: "2조", people_count: 3, role_description: "", operation_dates: [] },
   ],
   team_manager_id: "",
   poster_manager_id: "",
@@ -605,6 +610,7 @@ export default function CommunityPage() {
   }
 
   function fillPlanForm(plan: CommunityEventPlan | null) {
+    const planDates = plan?.operation_dates?.length ? plan.operation_dates : [""];
     setPlanForm(
       plan
         ? {
@@ -612,12 +618,15 @@ export default function CommunityPage() {
               planFields.map(field => [field.key, plan[field.key] ?? ""])
             ) as Pick<EventPlanForm, "purpose" | "target_participants" | "schedule_plan" | "location_plan" | "program_plan" | "role_plan" | "budget_plan" | "safety_plan">),
             operation_days: plan.operation_days ?? 1,
-            operation_dates: plan.operation_dates?.length ? plan.operation_dates : [""],
+            operation_dates: planDates,
             teams_per_day: plan.teams_per_day ?? 2,
             people_per_team: plan.people_per_team ?? 3,
             team_role_description: plan.team_role_description ?? "",
             team_requirements: plan.team_requirements?.length
-              ? plan.team_requirements
+              ? plan.team_requirements.map(team => ({
+                  ...team,
+                  operation_dates: team.operation_dates ?? planDates.filter(Boolean),
+                }))
               : emptyPlanForm.team_requirements,
             team_manager_id: plan.team_manager_id ?? "",
             poster_manager_id: plan.poster_manager_id ?? "",
@@ -674,13 +683,22 @@ export default function CommunityPage() {
     setPlanSaving(true);
     setPlanError("");
     try {
+      const teamsPerDay = Math.max(
+        ...operationDates.map(
+          operationDate =>
+            planForm.team_requirements.filter(team =>
+              team.operation_dates?.includes(operationDate)
+            ).length
+        ),
+        0
+      );
       const saved = await api<CommunityEventPlan>(`/community/${planTarget.id}/plan`, {
         method: "PUT",
         ...jsonBody({
           ...planForm,
           operation_dates: operationDates.length ? operationDates : null,
           operation_days: operationDates.length || null,
-          teams_per_day: planForm.team_requirements.length,
+          teams_per_day: teamsPerDay || null,
           people_per_team: Math.max(...planForm.team_requirements.map(team => team.people_count)),
           team_role_description: planForm.team_requirements.map(team => `${team.name}: ${team.role_description}`).join(" / "),
           team_manager_id: planForm.team_manager_id || null,
@@ -699,6 +717,59 @@ export default function CommunityPage() {
     } finally {
       setPlanSaving(false);
     }
+  }
+
+  function updatePlanOperationDate(index: number, nextDate: string) {
+    setPlanForm(current => {
+      const previousDate = current.operation_dates[index];
+      return {
+        ...current,
+        operation_dates: current.operation_dates.map((item, itemIndex) =>
+          itemIndex === index ? nextDate : item
+        ),
+        team_requirements: current.team_requirements.map(team => ({
+          ...team,
+          operation_dates: (team.operation_dates ?? [])
+            .map(date => (date === previousDate ? nextDate : date))
+            .filter(Boolean),
+        })),
+      };
+    });
+  }
+
+  function removePlanOperationDate(index: number) {
+    setPlanForm(current => {
+      const removedDate = current.operation_dates[index];
+      return {
+        ...current,
+        operation_dates: current.operation_dates.filter(
+          (_, itemIndex) => itemIndex !== index
+        ),
+        team_requirements: current.team_requirements.map(team => ({
+          ...team,
+          operation_dates: (team.operation_dates ?? []).filter(
+            date => date !== removedDate
+          ),
+        })),
+      };
+    });
+  }
+
+  function togglePlanTeamDate(teamIndex: number, operationDate: string) {
+    if (!operationDate) return;
+    setPlanForm(current => ({
+      ...current,
+      team_requirements: current.team_requirements.map((team, itemIndex) => {
+        if (itemIndex !== teamIndex) return team;
+        const dates = team.operation_dates ?? [];
+        return {
+          ...team,
+          operation_dates: dates.includes(operationDate)
+            ? dates.filter(date => date !== operationDate)
+            : [...dates, operationDate],
+        };
+      }),
+    }));
   }
 
   async function submitPlan() {
@@ -1464,14 +1535,14 @@ export default function CommunityPage() {
                   <div className="grid gap-2">
                     {planForm.operation_dates.map((date, dateIndex) => (
                       <div key={dateIndex} className="flex gap-2">
-                        <input type="date" required value={date} onChange={event => setPlanForm(current => ({ ...current, operation_dates: current.operation_dates.map((item, itemIndex) => itemIndex === dateIndex ? event.target.value : item) }))} className="h-11 rounded-md border border-slate-300 bg-white px-3 text-sm" />
-                        <button type="button" disabled={planForm.operation_dates.length === 1} onClick={() => setPlanForm(current => ({ ...current, operation_dates: current.operation_dates.filter((_, itemIndex) => itemIndex !== dateIndex) }))} className="inline-flex h-11 w-11 items-center justify-center rounded border border-slate-300 text-slate-500 disabled:opacity-40" aria-label="날짜 삭제"><Trash2 size={16} /></button>
+                        <input type="date" required value={date} onChange={event => updatePlanOperationDate(dateIndex, event.target.value)} className="h-11 rounded-md border border-slate-300 bg-white px-3 text-sm" />
+                        <button type="button" disabled={planForm.operation_dates.length === 1} onClick={() => removePlanOperationDate(dateIndex)} className="inline-flex h-11 w-11 items-center justify-center rounded border border-slate-300 text-slate-500 disabled:opacity-40" aria-label="날짜 삭제"><Trash2 size={16} /></button>
                       </div>
                     ))}
                     <button type="button" onClick={() => setPlanForm(current => ({ ...current, operation_dates: [...current.operation_dates, ""] }))} className="text-left text-sm font-semibold text-[#2563a8]">+ 날짜 추가</button>
                   </div>
                 </div>
-                <Button type="button" variant="secondary" onClick={() => setPlanForm(current => ({ ...current, team_requirements: [...current.team_requirements, { name: `${current.team_requirements.length + 1}조`, people_count: 1, role_description: "" }] }))}>
+                <Button type="button" variant="secondary" onClick={() => setPlanForm(current => ({ ...current, team_requirements: [...current.team_requirements, { name: `${current.team_requirements.length + 1}조`, people_count: 1, role_description: "", operation_dates: current.operation_dates.filter(Boolean) }] }))}>
                   <Plus size={16} /> 조 추가
                 </Button>
               </div>
@@ -1482,9 +1553,20 @@ export default function CommunityPage() {
                   <TextInput label="필요 인원" type="number" min={1} max={20} required value={team.people_count} onChange={event => setPlanForm(current => ({ ...current, team_requirements: current.team_requirements.map((item, itemIndex) => itemIndex === index ? { ...item, people_count: Number(event.target.value) } : item) }))} />
                   <button type="button" disabled={planForm.team_requirements.length === 1} onClick={() => setPlanForm(current => ({ ...current, team_requirements: current.team_requirements.filter((_, itemIndex) => itemIndex !== index) }))} className="mt-7 inline-flex h-11 w-11 items-center justify-center rounded border border-slate-300 text-slate-500 disabled:opacity-40" aria-label={`${team.name} 삭제`}><Trash2 size={17} /></button>
                   <TextArea className="sm:col-span-3" label={`${team.name || `${index + 1}조`} 역할`} required rows={2} maxLength={500} value={team.role_description} onChange={event => setPlanForm(current => ({ ...current, team_requirements: current.team_requirements.map((item, itemIndex) => itemIndex === index ? { ...item, role_description: event.target.value } : item) }))} placeholder="예: 정문에서 참가자 확인과 이동 안내" />
+                  <fieldset className="sm:col-span-3">
+                    <legend className="text-sm font-semibold text-slate-700">운영 날짜</legend>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+                      {planForm.operation_dates.filter(Boolean).map(operationDate => (
+                        <label key={operationDate} className="inline-flex items-center gap-2 text-sm text-slate-700">
+                          <input type="checkbox" checked={team.operation_dates?.includes(operationDate) ?? false} onChange={() => togglePlanTeamDate(index, operationDate)} />
+                          {operationDate}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
                 </div>
               ))}
-              <p className="text-sm text-slate-600">{planForm.operation_dates.length}일 · 하루 {planForm.team_requirements.reduce((sum, team) => sum + team.people_count, 0)}명 · 전체 {planForm.operation_dates.length * planForm.team_requirements.length}개 조를 편성합니다.</p>
+              <p className="text-sm text-slate-600">{planForm.operation_dates.filter(Boolean).length}일 · 총 {planForm.operation_dates.filter(Boolean).reduce((sum, operationDate) => sum + planForm.team_requirements.filter(team => team.operation_dates?.includes(operationDate)).length, 0)}개 조를 편성합니다.</p>
             </div>
             {planFields.map((field, index) => (
               <TextArea

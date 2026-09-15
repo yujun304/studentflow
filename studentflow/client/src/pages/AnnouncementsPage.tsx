@@ -12,7 +12,13 @@ import {
   TextInput,
 } from "@/components/primitives";
 export default function AnnouncementsPage() {
-  const { announcements, currentRole, publishAnnouncement, deleteAnnouncement } = useApp();
+  const {
+    announcements,
+    currentRole,
+    publishAnnouncement,
+    deleteAnnouncement,
+    readAnnouncement,
+  } = useApp();
   const [selected, setSelected] = useState<Announcement | null>(null);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -48,13 +54,27 @@ export default function AnnouncementsPage() {
     setForm({ title: "", body: "", target: "학생회 전체" });
   }
   async function removeAnnouncement() {
-    if (!selected || !window.confirm(`“${selected.title}” 공지를 삭제할까요? 삭제한 공지는 되돌릴 수 없습니다.`)) return;
+    if (
+      !selected ||
+      !window.confirm(
+        `“${selected.title}” 공지를 삭제할까요? 삭제한 공지는 되돌릴 수 없습니다.`
+      )
+    )
+      return;
     try {
       await deleteAnnouncement(selected.id);
       setSelected(null);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "공지를 삭제하지 못했습니다.");
+      setError(
+        reason instanceof ApiError
+          ? reason.message
+          : "공지를 삭제하지 못했습니다."
+      );
     }
+  }
+  function openAnnouncement(announcement: Announcement) {
+    setSelected(announcement);
+    if (!announcement.read) void readAnnouncement(announcement.id);
   }
   return (
     <div className="mx-auto max-w-[1120px] px-4 py-7 sm:px-6 lg:px-8">
@@ -86,7 +106,7 @@ export default function AnnouncementsPage() {
           {rows.map(announcement => (
             <button
               key={announcement.id}
-              onClick={() => setSelected(announcement)}
+              onClick={() => openAnnouncement(announcement)}
               className="w-full px-4 py-4 text-left hover:bg-slate-50 sm:px-5"
             >
               <div className="flex items-center gap-2">
@@ -135,7 +155,29 @@ export default function AnnouncementsPage() {
           selected ? `${selected.author} · ${selected.createdAt}` : undefined
         }
         onClose={() => setSelected(null)}
-        footer={<><Button variant="secondary" onClick={() => setSelected(null)}>닫기</Button>{selected?.canEdit && <Button variant="danger" onClick={() => void removeAnnouncement()}><Trash2 size={16} />공지 삭제</Button>}</>}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setSelected(null)}>
+              닫기
+            </Button>
+            {selected && (
+              <a href={`/announcements/${selected.id}`}>
+                <Button>
+                  {selected.application ? "신청 화면 열기" : "자세히 보기"}
+                </Button>
+              </a>
+            )}
+            {selected?.canEdit && (
+              <Button
+                variant="danger"
+                onClick={() => void removeAnnouncement()}
+              >
+                <Trash2 size={16} />
+                공지 삭제
+              </Button>
+            )}
+          </>
+        }
       >
         {selected && (
           <div className="grid gap-5">

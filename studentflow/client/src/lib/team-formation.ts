@@ -35,7 +35,14 @@ export function createFormationPlan(input: {
   people: User[];
   teamsPerDay: number;
   dates: string[];
-  requirements?: Array<{ name: string; peopleCount: number; roleDescription: string; startTime?: string; endTime?: string }>;
+  requirements?: Array<{
+    name: string;
+    peopleCount: number;
+    roleDescription: string;
+    startTime?: string;
+    endTime?: string;
+    operationDates?: string[];
+  }>;
 }): TeamFormationPlan {
   const people = [...input.people].sort(
     (left, right) =>
@@ -49,22 +56,27 @@ export function createFormationPlan(input: {
   }
 
   const requirements = input.requirements?.length ? input.requirements : undefined;
-  const teamsPerDay = requirements?.length ?? Math.max(1, Math.min(20, input.teamsPerDay));
   const teams: TeamFormationPreview[] = [];
   const warnings: string[] = [];
 
   dates.forEach((date, dateIndex) => {
+    const dayRequirements = requirements?.filter(
+      requirement =>
+        requirement.operationDates === undefined ||
+        requirement.operationDates.includes(date)
+    );
+    const teamsPerDay = dayRequirements?.length ?? Math.max(1, Math.min(20, input.teamsPerDay));
     const dayTeams = Array.from({ length: teamsPerDay }, (_, teamIndex) => ({
       name:
         dates.length > 1
-          ? `${dateLabel(date)} ${requirements?.[teamIndex]?.name ?? `${teamIndex + 1}조`}`
-          : (requirements?.[teamIndex]?.name ?? `${teamIndex + 1}조`),
+          ? `${dateLabel(date)} ${dayRequirements?.[teamIndex]?.name ?? `${teamIndex + 1}조`}`
+          : (dayRequirements?.[teamIndex]?.name ?? `${teamIndex + 1}조`),
       dateIndex,
-      scheduleAt: scheduleAt(date, requirements?.[teamIndex]?.startTime),
+      scheduleAt: scheduleAt(date, dayRequirements?.[teamIndex]?.startTime),
       leaderId: "",
       members: [] as User[],
-      requiredPeople: requirements?.[teamIndex]?.peopleCount,
-      roleDescription: requirements?.[teamIndex]?.roleDescription,
+      requiredPeople: dayRequirements?.[teamIndex]?.peopleCount,
+      roleDescription: dayRequirements?.[teamIndex]?.roleDescription,
     }));
     const rotatedPeople = people.map(
       (_, index) => people[(index + dateIndex) % people.length]

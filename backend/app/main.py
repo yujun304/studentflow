@@ -20,6 +20,7 @@ from app.api import (
     reminders,
     tasks,
     teams,
+    tutorial,
 )
 from app.core.config import settings
 from app.core.errors import install_error_handlers
@@ -45,6 +46,7 @@ api.include_router(events.router)
 api.include_router(tasks.router)
 api.include_router(notices.router)
 api.include_router(teams.router)
+api.include_router(tutorial.router)
 api.include_router(attendance.router)
 api.include_router(meeting_records.router)
 api.include_router(comments.router)

@@ -1,4 +1,4 @@
-import { CalendarCheck, FileAudio, RefreshCw } from "lucide-react";
+import { CalendarCheck, FileAudio, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -26,6 +26,31 @@ type MeetingRecordDraft = {
   next_actions: string;
 };
 
+type PlanningTeamRequirement = {
+  id: string;
+  name: string;
+  people_count: number | "";
+  start_time: string;
+  end_time: string;
+  role_description: string;
+  operation_dates: string[];
+};
+
+function newTeamRequirement(
+  index: number,
+  operationDates: string[]
+): PlanningTeamRequirement {
+  return {
+    id: crypto.randomUUID(),
+    name: `${index + 1}조`,
+    people_count: 1,
+    start_time: "",
+    end_time: "",
+    role_description: "",
+    operation_dates: operationDates.filter(Boolean),
+  };
+}
+
 function datetimeLocalValue(value: string | null) {
   if (!value) return "";
   const parsed = new Date(value);
@@ -49,8 +74,10 @@ export default function ProposalWorkflowPanel({
   const [transcript, setTranscript] = useState("");
   const [meetingNotes, setMeetingNotes] = useState("");
   const [finalPlan, setFinalPlan] = useState<Record<string, unknown>>({});
-  const [dates, setDates] = useState("");
-  const [teams, setTeams] = useState("");
+  const [operationDates, setOperationDates] = useState<string[]>([""]);
+  const [teamRequirements, setTeamRequirements] = useState<
+    PlanningTeamRequirement[]
+  >([]);
   const [teamManagerId, setTeamManagerId] = useState("");
   const [reviewNote, setReviewNote] = useState("");
   const [meetingRecordDraft, setMeetingRecordDraft] =
@@ -72,22 +99,40 @@ export default function ProposalWorkflowPanel({
       setFinalPlan(next.final_plan ?? {});
       setTranscript(next.meeting_transcript ?? "");
       setMeetingNotes(String(next.meeting_notes?.summary ?? ""));
-      setDates(
-        Array.isArray(next.final_plan?.operation_dates)
-          ? next.final_plan.operation_dates.join("\n")
+      const loadedDates = Array.isArray(next.final_plan?.operation_dates)
+        ? next.final_plan.operation_dates.map(String).filter(Boolean)
+        : [];
+      setOperationDates(loadedDates.length ? loadedDates : [""]);
+      const loadedTeams = Array.isArray(next.final_plan?.team_requirements)
+        ? next.final_plan.team_requirements.map(item => {
+            const team = item as Record<string, unknown>;
+            const teamDates = Array.isArray(team.operation_dates)
+              ? team.operation_dates.map(String).filter(date => loadedDates.includes(date))
+              : loadedDates;
+            const peopleCount = Number(team.people_count);
+            return {
+              id: crypto.randomUUID(),
+              name: String(team.name ?? ""),
+              people_count:
+                Number.isInteger(peopleCount) && peopleCount > 0
+                  ? peopleCount
+                  : "",
+              start_time: String(team.start_time ?? ""),
+              end_time: String(team.end_time ?? ""),
+              role_description: String(team.role_description ?? ""),
+              operation_dates: teamDates,
+            } satisfies PlanningTeamRequirement;
+          })
+        : [];
+      setTeamRequirements(loadedTeams);
+      const loadedManagerId = next.plan?.team_manager_id ?? "";
+      setTeamManagerId(
+        users.some(
+          user => user.id === loadedManagerId && user.role !== "TEACHER"
+        )
+          ? loadedManagerId
           : ""
       );
-      setTeams(
-        Array.isArray(next.final_plan?.team_requirements)
-          ? next.final_plan.team_requirements
-              .map(item => {
-                const team = item as Record<string, unknown>;
-                return `${team.name ?? ""} | ${team.people_count ?? ""} | ${team.start_time ?? ""} | ${team.end_time ?? ""} | ${team.role_description ?? ""}`;
-              })
-              .join("\n")
-          : ""
-      );
-      setTeamManagerId(next.plan?.team_manager_id ?? "");
       setReviewNote(next.plan?.review_note ?? "");
     } catch (reason) {
       setError(
@@ -96,7 +141,7 @@ export default function ProposalWorkflowPanel({
           : "기획 진행 상태를 불러오지 못했습니다."
       );
     }
-  }, [proposalId]);
+  }, [proposalId, users]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -172,23 +217,83 @@ export default function ProposalWorkflowPanel({
       "최종 기획서를 저장했습니다."
     );
   }
+  const normalizedOperationDates = operationDates.filter(Boolean);
+  const hasDuplicateOperationDate =
+    new Set(normalizedOperationDates).size !== normalizedOperationDates.length;
+  const hasOperationDateWithoutTeam = normalizedOperationDates.some(
+    operationDate =>
+      !teamRequirements.some(team => team.operation_dates.includes(operationDate))
+  );
+  const hasInvalidTeamRequirement = teamRequirements.some(
+    item =>
+      !item.name.trim() ||
+      !Number.isInteger(item.people_count) ||
+      Number(item.people_count) < 1 ||
+      Number(item.people_count) > 20 ||
+      !item.role_description.trim() ||
+      !item.operation_dates.length
+  );
   function finalDocument() {
-    const operation_dates = dates
-      .split(/\r?\n/)
-      .map(item => item.trim())
-      .filter(Boolean);
-    const team_requirements = teams
-      .split(/\r?\n/)
-      .map(line => line.split("|").map(item => item.trim()))
-      .filter(parts => parts.some(Boolean))
-      .map(([name, count, start_time, end_time, role_description]) => ({
-        name,
-        people_count: Number(count),
-        role_description,
-        start_time: start_time || null,
-        end_time: end_time || null,
-      }));
+    const operation_dates = normalizedOperationDates;
+    const team_requirements = teamRequirements.map(({ id: _id, ...team }) => ({
+      ...team,
+      name: team.name.trim(),
+      people_count: Number(team.people_count),
+      role_description: team.role_description.trim(),
+      start_time: team.start_time || null,
+      end_time: team.end_time || null,
+      operation_dates: team.operation_dates.filter(date =>
+        operation_dates.includes(date)
+      ),
+    }));
     return { ...finalPlan, operation_dates, team_requirements, team_manager_id: teamManagerId || null };
+  }
+  function updateOperationDate(index: number, nextDate: string) {
+    const previousDate = operationDates[index];
+    setOperationDates(current =>
+      current.map((date, dateIndex) => (dateIndex === index ? nextDate : date))
+    );
+    if (!previousDate) return;
+    setTeamRequirements(current =>
+      current.map(team => ({
+        ...team,
+        operation_dates: team.operation_dates.map(date =>
+          date === previousDate ? nextDate : date
+        ).filter(Boolean),
+      }))
+    );
+  }
+  function removeOperationDate(index: number) {
+    const removedDate = operationDates[index];
+    setOperationDates(current => current.filter((_, dateIndex) => dateIndex !== index));
+    setTeamRequirements(current =>
+      current.map(team => ({
+        ...team,
+        operation_dates: team.operation_dates.filter(date => date !== removedDate),
+      }))
+    );
+  }
+  function updateTeam(
+    id: string,
+    values: Partial<PlanningTeamRequirement>
+  ) {
+    setTeamRequirements(current =>
+      current.map(team => (team.id === id ? { ...team, ...values } : team))
+    );
+  }
+  function toggleTeamDate(teamId: string, operationDate: string) {
+    setTeamRequirements(current =>
+      current.map(team => {
+        if (team.id !== teamId) return team;
+        const selected = team.operation_dates.includes(operationDate);
+        return {
+          ...team,
+          operation_dates: selected
+            ? team.operation_dates.filter(date => date !== operationDate)
+            : [...team.operation_dates, operationDate],
+        };
+      })
+    );
   }
   async function saveAndSubmitFinal() {
     if (
@@ -319,8 +424,13 @@ export default function ProposalWorkflowPanel({
   const submissionMissing: string[] = requiredFinalFields
     .filter(([key]) => !value(finalPlan, key).trim())
     .map(([, label]) => label);
-  if (!dates.trim()) submissionMissing.push("운영 날짜");
-  if (!teams.trim()) submissionMissing.push("조 구성");
+  if (!normalizedOperationDates.length || operationDates.some(date => !date))
+    submissionMissing.push("운영 날짜");
+  else if (hasDuplicateOperationDate) submissionMissing.push("중복되지 않은 운영 날짜");
+  else if (hasOperationDateWithoutTeam)
+    submissionMissing.push("각 운영 날짜에 배정할 조");
+  if (!teamRequirements.length || hasInvalidTeamRequirement)
+    submissionMissing.push("조별 이름·인원·역할·운영 날짜");
   if (!teamManagerId) submissionMissing.push("조 편성 담당자");
   const canRequestReview = Boolean(
     workflow.plan &&
@@ -783,16 +893,166 @@ export default function ProposalWorkflowPanel({
                   setFinalField("safety_plan", event.target.value)
                 }
               />
-              <TextArea
-                label="운영 날짜 (한 줄에 YYYY-MM-DD)"
-                value={dates}
-                onChange={event => setDates(event.target.value)}
-              />
-              <TextArea
-                label="조 구성 (조 이름 | 인원 | 시작 | 종료 | 역할)"
-                value={teams}
-                onChange={event => setTeams(event.target.value)}
-              />
+              <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 sm:col-span-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-800">운영 날짜</h4>
+                    <p className="mt-1 text-xs text-slate-500">
+                      달력에서 날짜를 고른 뒤 그날 운영할 조를 선택하세요.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setOperationDates(current => [...current, ""])}
+                  >
+                    <Plus size={15} /> 날짜 추가
+                  </Button>
+                </div>
+                {operationDates.map((operationDate, dateIndex) => (
+                  <div
+                    key={`${operationDate}-${dateIndex}`}
+                    className="grid gap-3 border-t border-slate-200 pt-3 sm:grid-cols-[180px_1fr_auto]"
+                  >
+                    <label className="grid gap-1 text-sm font-semibold text-slate-700">
+                      {dateIndex + 1}일차
+                      <input
+                        type="date"
+                        className="h-11 rounded-md border border-slate-300 bg-white px-3 text-sm font-normal"
+                        value={operationDate}
+                        onChange={event =>
+                          updateOperationDate(dateIndex, event.target.value)
+                        }
+                      />
+                    </label>
+                    <fieldset className="min-w-0">
+                      <legend className="text-sm font-semibold text-slate-700">
+                        이 날짜에 운영할 조
+                      </legend>
+                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+                        {teamRequirements.map((team, teamIndex) => (
+                          <label
+                            key={team.id}
+                            className="inline-flex items-center gap-2 text-sm text-slate-700"
+                          >
+                            <input
+                              type="checkbox"
+                              disabled={!operationDate}
+                              checked={
+                                Boolean(operationDate) &&
+                                team.operation_dates.includes(operationDate)
+                              }
+                              onChange={() => toggleTeamDate(team.id, operationDate)}
+                            />
+                            {team.name.trim() || `${teamIndex + 1}조`}
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <button
+                      type="button"
+                      disabled={operationDates.length === 1}
+                      onClick={() => removeOperationDate(dateIndex)}
+                      className="inline-flex h-11 w-11 items-center justify-center self-end rounded border border-slate-300 bg-white text-slate-500 disabled:opacity-40"
+                      aria-label={`${dateIndex + 1}일차 날짜 삭제`}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="grid gap-3 sm:col-span-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-800">조 구성</h4>
+                    <p className="mt-1 text-xs text-slate-500">
+                      조마다 필요한 내용을 각각 입력하세요.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      setTeamRequirements(current => [
+                        ...current,
+                        newTeamRequirement(current.length, normalizedOperationDates),
+                      ])
+                    }
+                  >
+                    <Plus size={15} /> 조 추가
+                  </Button>
+                </div>
+                {teamRequirements.map((team, teamIndex) => (
+                  <div
+                    key={team.id}
+                    className="grid gap-3 rounded-md border border-slate-200 p-4 sm:grid-cols-2 lg:grid-cols-[1fr_120px_140px_140px_auto]"
+                  >
+                    <TextInput
+                      label="조 이름"
+                      value={team.name}
+                      onChange={event => updateTeam(team.id, { name: event.target.value })}
+                    />
+                    <TextInput
+                      label="필요 인원"
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={team.people_count}
+                      onChange={event =>
+                        updateTeam(team.id, {
+                          people_count: event.target.value
+                            ? Number(event.target.value)
+                            : "",
+                        })
+                      }
+                    />
+                    <TextInput
+                      label="시작 시간"
+                      type="time"
+                      value={team.start_time}
+                      onChange={event =>
+                        updateTeam(team.id, { start_time: event.target.value })
+                      }
+                    />
+                    <TextInput
+                      label="종료 시간"
+                      type="time"
+                      value={team.end_time}
+                      onChange={event =>
+                        updateTeam(team.id, { end_time: event.target.value })
+                      }
+                    />
+                    <button
+                      type="button"
+                      disabled={teamRequirements.length === 1}
+                      onClick={() =>
+                        setTeamRequirements(current =>
+                          current.filter(item => item.id !== team.id)
+                        )
+                      }
+                      className="mt-6 inline-flex h-11 w-11 items-center justify-center rounded border border-slate-300 text-slate-500 disabled:opacity-40"
+                      aria-label={`${team.name || `${teamIndex + 1}조`} 삭제`}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                    <TextArea
+                      className="sm:col-span-2 lg:col-span-5"
+                      label={`${team.name.trim() || `${teamIndex + 1}조`} 역할`}
+                      rows={2}
+                      value={team.role_description}
+                      onChange={event =>
+                        updateTeam(team.id, { role_description: event.target.value })
+                      }
+                      placeholder="예: 정문에서 참가자 확인과 이동 안내"
+                    />
+                  </div>
+                ))}
+                {!teamRequirements.length && (
+                  <p className="rounded-md border border-dashed border-slate-300 px-4 py-5 text-center text-sm text-slate-500">
+                    아직 조가 없습니다. ‘조 추가’를 눌러 필요한 조를 입력하세요.
+                  </p>
+                )}
+              </div>
               <label className="grid gap-1 text-sm font-semibold text-slate-700">
                 조 편성 담당자
                 <select

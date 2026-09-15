@@ -33,6 +33,7 @@ type ApiUser = {
   term_id: string;
   grade: number | null;
   is_active: boolean;
+  onboarding_completed_at: string | null;
 };
 type ApiDepartment = { id: string; name: string };
 type ApiTask = {
@@ -51,7 +52,22 @@ type ApiTask = {
   teams_per_day?: number | null;
   people_per_team?: number | null;
   team_role_description?: string | null;
-  team_requirements?: Array<{ name: string; people_count: number; role_description: string; start_time?: string | null; end_time?: string | null }> | null;
+  team_requirements?: Array<{
+    name: string;
+    people_count: number;
+    role_description: string;
+    start_time?: string | null;
+    end_time?: string | null;
+    operation_dates?: string[] | null;
+  }> | null;
+  formation_draft?: Array<{
+    name: string;
+    schedule_at: string;
+    leader_id?: string | null;
+    member_ids: string[];
+    required_people: number;
+    role_description?: string | null;
+  }> | null;
 };
 type ApiEvent = {
   id: string;
@@ -77,6 +93,9 @@ type ApiNotice = {
   created_at: string;
   recipient_ids: string[];
   can_edit: boolean;
+  read: boolean;
+  applied_count: number;
+  application_status?: "ACCEPTED" | "WAITING" | null;
 };
 type ApiNotification = {
   id: string;
@@ -102,6 +121,7 @@ type ApiTeam = {
 type AppContextValue = {
   authReady: boolean;
   signedIn: boolean;
+  onboardingRequired: boolean;
   currentRole: Role;
   currentUser: User;
   testAccounts: User[];
@@ -135,6 +155,11 @@ type AppContextValue = {
     input: Pick<Announcement, "title" | "body" | "target">
   ) => Promise<void>;
   deleteAnnouncement: (announcementId: string) => Promise<void>;
+  readAnnouncement: (announcementId: string) => Promise<void>;
+  toggleAnnouncementApplication: (
+    announcementId: string,
+    applied: boolean
+  ) => Promise<void>;
   toggleEventJoin: (eventId: string) => Promise<void>;
   updateEvent: (
     eventId: string,
@@ -267,6 +292,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           roleDescription: item.role_description,
           startTime: item.start_time ?? undefined,
           endTime: item.end_time ?? undefined,
+          operationDates: item.operation_dates ?? undefined,
+        })),
+        formationDraft: task.formation_draft?.map(item => ({
+          name: item.name,
+          scheduleAt: item.schedule_at,
+          leaderId: item.leader_id ?? undefined,
+          memberIds: item.member_ids,
+          requiredPeople: item.required_people,
+          roleDescription: item.role_description ?? undefined,
         })),
       }))
     );
@@ -318,14 +352,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ? `${notice.recipient_ids.length}명`
           : "학생회 전체",
         pinned: notice.pinned,
-        read: false,
+        read: notice.read,
         canEdit: notice.can_edit,
         application:
           notice.type === "FIRST_COME" && notice.capacity
             ? {
                 capacity: notice.capacity,
-                applied: 0,
+                applied: notice.applied_count,
                 deadline: "공지에서 확인",
+                status: notice.application_status ?? undefined,
               }
             : undefined,
       }))
@@ -335,7 +370,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ? `/tasks/${notice.target_id}`
         : notice.target_type === "proposal" && notice.target_id
           ? `/proposals/${notice.target_id}`
-        : notice.target_type === "notice" && notice.target_id
+          : notice.target_type === "notice" && notice.target_id
             ? `/announcements/${notice.target_id}`
             : "/notifications";
     setNotices(
@@ -353,7 +388,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         id: team.id,
         name: team.name,
         purpose: team.description ?? "공동 활동",
-        members: team.member_ids.map(id => userMap.get(id)?.name ?? "알 수 없음"),
+        members: team.member_ids.map(
+          id => userMap.get(id)?.name ?? "알 수 없음"
+        ),
         memberIds: team.member_ids,
         leader: team.leader_id
           ? (userMap.get(team.leader_id)?.name ?? "확인 중")
@@ -404,6 +441,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value: AppContextValue = {
     authReady,
     signedIn,
+    onboardingRequired: Boolean(apiUser && !apiUser.onboarding_completed_at),
     currentRole: apiUser?.role ?? "MEMBER",
     currentUser,
     testAccounts,
@@ -475,10 +513,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await refresh();
     },
     async submitTask(taskId, file) {
-      const version = await api<{ id: string }>(`/tasks/${taskId}/submissions`, {
-        method: "POST",
-        ...jsonBody({ content: `제출 파일: ${file.name}` }),
-      });
+      const version = await api<{ id: string }>(
+        `/tasks/${taskId}/submissions`,
+        {
+          method: "POST",
+          ...jsonBody({ content: `제출 파일: ${file.name}` }),
+        }
+      );
       const formData = new FormData();
       formData.append("upload", file);
       await api(`/tasks/submission-versions/${version.id}/files`, {
@@ -503,6 +544,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     async deleteAnnouncement(announcementId) {
       await api(`/notices/${announcementId}`, { method: "DELETE" });
+      await refresh();
+    },
+    async readAnnouncement(announcementId) {
+      await api(`/notices/${announcementId}/read`, { method: "POST" });
+      await refresh();
+    },
+    async toggleAnnouncementApplication(announcementId, applied) {
+      await api(`/notices/${announcementId}/${applied ? "cancel" : "apply"}`, {
+        method: "POST",
+      });
       await refresh();
     },
     async toggleEventJoin(eventId) {

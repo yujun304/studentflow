@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -49,7 +49,15 @@ def require_test_account_switch() -> None:
 
 @router.post("/login", response_model=UserOut, dependencies=[Depends(csrf_protect)])
 async def login(data: LoginIn, response: Response, db: AsyncSession = Depends(get_db)) -> User:
-    user = await db.scalar(select(User).where(User.email == login_email(data.email)))
+    identifier = data.email.strip()
+    user = await db.scalar(
+        select(User).where(
+            or_(
+                User.email == login_email(identifier),
+                func.lower(User.login_id) == identifier.lower(),
+            )
+        )
+    )
     if not user or not verify_password(data.password, user.password_hash) or not user.is_active:
         raise AppError(401, "invalid_credentials", "아이디 또는 비밀번호가 올바르지 않습니다.")
     access, refresh, csrf = await issue_tokens(db, user)

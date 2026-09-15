@@ -24,6 +24,7 @@ from app.api.proposals import (
     save_proposal_meeting_notes,
     transcribe_proposal_meeting_audio,
     toggle_proposal_recommendation,
+    update_proposal_final_plan,
     update_proposal_feedback,
 )
 from app.core.database import Base
@@ -55,6 +56,7 @@ from app.schemas import (
     ProposalFeedbackIn,
     ProposalMeetingNotesIn,
     ProposalMeetingRecordDraftIn,
+    ProposalPlanningDocumentIn,
     ProposalVersionCreateIn,
 )
 
@@ -570,8 +572,9 @@ async def test_manual_meeting_result_does_not_require_audio_or_ai():
             select(CommunityEventPlan).where(CommunityEventPlan.post_id == proposal.id)
         )
 
-        assert workflow.stage == "MEETING_COMPLETED"
+        assert workflow.stage == "FINAL_PLAN_DRAFT"
         assert workflow.meeting_audio is None
+        assert plan.final_plan is not None
         assert plan.meeting_notes["source"] == "manual_notes"
         assert plan.transcription_provider == "manual"
         assert plan.ai_provider == "fallback"
@@ -709,6 +712,150 @@ async def test_feedback_request_does_not_block_agenda_before_every_student_respo
         advanced = await get_proposal_detail(proposal.id, author, db)
         assert advanced.status == "CONFIRMED"
         assert advanced.completed_required_feedback_count == 0
+    finally:
+        await db.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_final_plan_draft_can_clear_teacher_as_team_manager():
+    engine, db, _author, _peer, teacher = await proposal_fixture()
+    try:
+        proposal = await create_proposal(
+            ProposalCreateIn(title="학생 휴게 공간", description="빈 교실을 휴게 공간으로 활용하자."),
+            teacher,
+            db,
+        )
+        await promote_proposal_to_agenda(proposal.id, teacher, db)
+        await save_proposal_meeting_notes(
+            proposal.id,
+            ProposalMeetingNotesIn(transcript="", manual_notes="운영 방법은 다음 회의에서 정한다."),
+            teacher,
+            db,
+        )
+        plan = await db.scalar(
+            select(CommunityEventPlan).where(CommunityEventPlan.post_id == proposal.id)
+        )
+        assert plan is not None
+        assert plan.team_manager_id == teacher.id
+
+        document = generated_plan_for_endpoint()
+        document["team_manager_id"] = None
+        saved = await update_proposal_final_plan(
+            proposal.id,
+            ProposalPlanningDocumentIn(document=document),
+            teacher,
+            db,
+        )
+
+        assert saved.plan is not None
+        assert saved.plan.team_manager_id is None
+        assert plan.team_manager_id is None
+    finally:
+        await db.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_final_plan_rejects_missing_team_count_without_server_error():
+    engine, db, _author, _peer, teacher = await proposal_fixture()
+    try:
+        proposal = await create_proposal(
+            ProposalCreateIn(title="학생 휴게 공간", description="빈 교실을 휴게 공간으로 활용하자."),
+            teacher,
+            db,
+        )
+        await promote_proposal_to_agenda(proposal.id, teacher, db)
+        await save_proposal_meeting_notes(
+            proposal.id,
+            ProposalMeetingNotesIn(transcript="", manual_notes="운영 방법을 회의에서 정했다."),
+            teacher,
+            db,
+        )
+        document = generated_plan_for_endpoint()
+        document["team_requirements"][0]["people_count"] = None
+
+        with pytest.raises(AppError) as invalid:
+            await update_proposal_final_plan(
+                proposal.id,
+                ProposalPlanningDocumentIn(document=document),
+                teacher,
+                db,
+            )
+
+        assert invalid.value.status == 422
+        assert invalid.value.code == "invalid_team_requirements"
+    finally:
+        await db.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_final_plan_keeps_each_teams_selected_operation_dates():
+    engine, db, _author, _peer, teacher = await proposal_fixture()
+    try:
+        proposal = await create_proposal(
+            ProposalCreateIn(title="학생 휴게 공간", description="빈 교실을 휴게 공간으로 활용하자."),
+            teacher,
+            db,
+        )
+        await promote_proposal_to_agenda(proposal.id, teacher, db)
+        await save_proposal_meeting_notes(
+            proposal.id,
+            ProposalMeetingNotesIn(transcript="", manual_notes="9월 18일과 19일에 운영한다."),
+            teacher,
+            db,
+        )
+        document = generated_plan_for_endpoint()
+        document["operation_dates"] = ["2026-09-18", "2026-09-19"]
+        document["team_manager_id"] = None
+        document["team_requirements"] = [
+            {
+                "name": "안내조",
+                "people_count": 2,
+                "role_description": "동선 안내",
+                "operation_dates": ["2026-09-18"],
+            },
+            {
+                "name": "정리조",
+                "people_count": 3,
+                "role_description": "행사 정리",
+                "operation_dates": ["2026-09-19"],
+            },
+        ]
+
+        saved = await update_proposal_final_plan(
+            proposal.id,
+            ProposalPlanningDocumentIn(document=document),
+            teacher,
+            db,
+        )
+
+        assert saved.plan is not None
+        assert saved.plan.teams_per_day == 1
+        assert saved.plan.team_requirements is not None
+        assert saved.plan.team_requirements[0].operation_dates == [date(2026, 9, 18)]
+        assert saved.plan.team_requirements[1].operation_dates == [date(2026, 9, 19)]
+    finally:
+        await db.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_teacher_can_promote_proposal_without_recommendation_threshold():
+    engine, db, author, _peer, teacher = await proposal_fixture()
+    try:
+        proposal = await create_proposal(
+            ProposalCreateIn(title="학생 휴게 공간", description="빈 교실을 휴게 공간으로 활용하자."),
+            author,
+            db,
+        )
+
+        workflow = await promote_proposal_to_agenda(proposal.id, teacher, db)
+
+        assert workflow.stage == "MEETING_AGENDA"
+        assert workflow.can_promote is True
+        assert workflow.can_manage is True
     finally:
         await db.close()
         await engine.dispose()

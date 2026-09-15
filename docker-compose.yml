@@ -45,7 +45,7 @@ services:
   frontend:
     build: ./studentflow
     ports:
-      - "${COMPOSE_FRONTEND_PORT:-8081}:80"
+      - "127.0.0.1:${COMPOSE_FRONTEND_PORT:-8081}:80"
     depends_on:
       - backend
 

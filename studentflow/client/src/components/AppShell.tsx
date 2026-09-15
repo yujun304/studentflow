@@ -10,6 +10,7 @@ import {
   MessageCircle,
   Route,
   ShieldCheck,
+  ClipboardList,
   UsersRound,
   X,
 } from "lucide-react";
@@ -32,6 +33,7 @@ const primaryMenu = [
 
 const supportingMenu = [
   ["/tutorial", "체험 안내", Route],
+  ["/operations", "행사 운영", ClipboardList],
   ["/announcements", "공지", Megaphone],
   ["/notifications", "알림", Bell],
   ["/teams", "조 편성", UsersRound],
@@ -51,7 +53,9 @@ function isActive(location: string, href: string) {
 }
 
 function accountDescription(user: Pick<User, "department" | "grade" | "role">) {
-  return [user.grade, user.department, roles[user.role]].filter(Boolean).join(" · ");
+  return [user.grade, user.department, roles[user.role]]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function NavItem({
@@ -133,13 +137,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
     signOut,
     testAccounts,
     switchTestAccount,
+    onboardingRequired,
   } = useApp();
   const [moreOpen, setMoreOpen] = useState(false);
   const [switchingAccount, setSwitchingAccount] = useState(false);
   const location = currentDocumentPath();
   const unread = notices.filter(notice => !notice.read).length;
   const visibleSupportingMenu = supportingMenu.filter(
-    ([href]) => !["/event-create", "/users"].includes(href) || currentRole === "TEACHER"
+    ([href]) =>
+      !["/event-create", "/users"].includes(href) || currentRole === "TEACHER"
   );
   const moreActive = visibleSupportingMenu.some(([href]) =>
     isActive(location, href)
@@ -251,7 +257,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <Brand compact />
         </div>
         <div className="hidden min-w-0 md:block">
-          <p className="truncate text-sm font-semibold text-slate-600">{pageLabel}</p>
+          <p className="truncate text-sm font-semibold text-slate-600">
+            {pageLabel}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />
@@ -271,6 +279,22 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </header>
 
       <main className="pb-[calc(6rem+env(safe-area-inset-bottom))] md:ml-[232px] md:pb-10">
+        {onboardingRequired && location !== "/tutorial" && (
+          <div className="border-b border-[#c9ddf2] bg-[#f4f8fc] px-4 py-3 sm:px-6">
+            <div className="mx-auto flex max-w-[1120px] items-center justify-between gap-3">
+              <p className="text-xs font-semibold text-[#1f528b]">
+                기능 체험이 진행 중입니다. 작업을 마치면 안내 화면으로
+                돌아오세요.
+              </p>
+              <Link
+                href="/tutorial"
+                className="shrink-0 text-xs font-bold text-[#1f528b] underline underline-offset-2"
+              >
+                체험 계속
+              </Link>
+            </div>
+          </div>
+        )}
         {children}
       </main>
 
@@ -279,12 +303,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         aria-label="주요 메뉴"
       >
         {mobileMain.map(([href, label, Icon]) => (
-          <BottomLink
-            key={href}
-            href={href}
-            label={label}
-            Icon={Icon}
-          />
+          <BottomLink key={href} href={href} label={label} Icon={Icon} />
         ))}
         <button
           onClick={() => setMoreOpen(true)}
@@ -337,7 +356,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <Icon size={21} />
                   <span>{label}</span>
                   {href === "/notifications" && unread > 0 && (
-                    <span className="ml-auto text-xs font-bold text-[#b42318]">읽지 않음 {unread}</span>
+                    <span className="ml-auto text-xs font-bold text-[#b42318]">
+                      읽지 않음 {unread}
+                    </span>
                   )}
                 </Link>
               ))}

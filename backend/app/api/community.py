@@ -51,6 +51,7 @@ from app.schemas import (
     CommunityRecommendationCountIn,
 )
 from app.services.notifications import create_notifications
+from app.services.team_formation_draft import build_team_formation_draft
 
 router = APIRouter(prefix="/community", tags=["community"])
 event_manager = require_roles(Role.DEPARTMENT_HEAD, Role.EXECUTIVE_BOARD, Role.TEACHER)
@@ -80,7 +81,21 @@ def plan_is_complete(plan: CommunityEventPlan) -> bool:
         and len(plan.operation_dates) == len(set(plan.operation_dates))
         and plan.team_requirements
         and all(
-            item.get("name") and item.get("role_description") and item.get("people_count")
+            any(
+                "operation_dates" not in item
+                or operation_date in (item.get("operation_dates") or [])
+                for item in plan.team_requirements
+            )
+            for operation_date in plan.operation_dates
+        )
+        and all(
+            item.get("name")
+            and item.get("role_description")
+            and item.get("people_count")
+            and (
+                "operation_dates" not in item
+                or bool(item.get("operation_dates"))
+            )
             for item in plan.team_requirements
         )
         and plan.team_manager_id
@@ -767,9 +782,20 @@ async def save_community_event_plan(
         values["operation_days"] = len(values["operation_dates"])
     if "team_requirements" in values and values["team_requirements"] is not None:
         values["team_requirements"] = [
-            item.model_dump() if hasattr(item, "model_dump") else item
+            item.model_dump(mode="json") if hasattr(item, "model_dump") else item
             for item in values["team_requirements"]
         ]
+        plan_dates = values.get("operation_dates", plan.operation_dates) or []
+        for item in values["team_requirements"]:
+            item_dates = item.get("operation_dates")
+            if item_dates is None:
+                item["operation_dates"] = list(plan_dates)
+            elif not set(item_dates).issubset(set(plan_dates)):
+                raise AppError(
+                    422,
+                    "community_plan_invalid_team_dates",
+                    "조 운영 날짜는 기획서에서 선택한 날짜 중에서 골라 주세요.",
+                )
 
     manager_ids = {
         value
@@ -1321,6 +1347,7 @@ async def convert_community_post_to_event(
         data.event_date - timedelta(days=7), time(18, 0), tzinfo=local_zone
     )
     team_task.created_by = actor.id
+    team_task.formation_draft = await build_team_formation_draft(db, team_task)
     poster_task = None
     if plan.poster_required:
         poster_task = await db.get(Task, plan.poster_task_id) if plan.poster_task_id else None

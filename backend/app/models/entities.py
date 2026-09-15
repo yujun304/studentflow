@@ -129,6 +129,7 @@ class User(UUIDMixin, TimeMixin, Base):
         CheckConstraint("grade IS NULL OR grade BETWEEN 1 AND 3", name="ck_users_grade"),
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    login_id: Mapped[str | None] = mapped_column(String(100), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(100))
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[Role] = mapped_column(Enum(Role, name="role"), default=Role.MEMBER)
@@ -137,6 +138,7 @@ class User(UUIDMixin, TimeMixin, Base):
     grade: Mapped[int | None] = mapped_column(Integer, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     session_version: Mapped[int] = mapped_column(Integer, default=1)
+    onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RefreshSession(UUIDMixin, Base):
@@ -172,6 +174,25 @@ class EventParticipant(UUIDMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
 
 
+class TutorialWorkspace(UUIDMixin, Base):
+    """Real, isolated records used by one account while learning StudentFlow."""
+
+    __tablename__ = "tutorial_workspaces"
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"))
+    simple_task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    formation_task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE")
+    )
+    submission_task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE")
+    )
+    notice_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("notices.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Task(UUIDMixin, TimeMixin, Base):
     __tablename__ = "tasks"
     term_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("terms.id"), index=True)
@@ -189,6 +210,7 @@ class Task(UUIDMixin, TimeMixin, Base):
     team_role_description: Mapped[str | None] = mapped_column(String(500))
     team_requirements: Mapped[list[dict] | None] = mapped_column(JSON)
     operation_dates: Mapped[list[str] | None] = mapped_column(JSON)
+    formation_draft: Mapped[list[dict] | None] = mapped_column(JSON)
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
 
 

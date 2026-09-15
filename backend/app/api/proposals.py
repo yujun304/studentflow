@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Header, UploadFile
@@ -68,6 +68,7 @@ router = APIRouter(prefix="/proposals", tags=["proposals"])
 VALID_STATUSES = {"DISCUSSING", "RE_REVIEW", "CONFIRMED"}
 EDITABLE_PLAN_STATUSES = {"DRAFT", "CHANGES_REQUESTED", "REJECTED"}
 STUDENT_ROLES = {Role.MEMBER, Role.DEPARTMENT_HEAD, Role.EXECUTIVE_BOARD}
+WORKFLOW_MANAGER_ROLES = {Role.DEPARTMENT_HEAD, Role.EXECUTIVE_BOARD, Role.TEACHER}
 
 
 def proposal_ai_error_status(error: ProposalAIError) -> int:
@@ -124,7 +125,7 @@ def attachment_out(item: ProposalAttachment) -> ProposalAttachmentOut:
 
 
 def can_manage_workflow(proposal: CommunityPost, user: User) -> bool:
-    return user.role in {Role.DEPARTMENT_HEAD, Role.EXECUTIVE_BOARD} or user.id in {
+    return user.role in WORKFLOW_MANAGER_ROLES or user.id in {
         proposal.author_id,
         proposal.plan_writer_id,
     }
@@ -284,7 +285,7 @@ async def workflow_output(
         plan=plan_out(plan, proposal, user) if plan else None,
         can_manage=can_manage_workflow(proposal, user),
         can_promote=(
-            user.role in {Role.DEPARTMENT_HEAD, Role.EXECUTIVE_BOARD}
+            user.role in WORKFLOW_MANAGER_ROLES
             or recommendation_count >= settings.proposal_agenda_recommendation_threshold
         ),
         audio_extensions=sorted(settings.allowed_proposal_audio_extensions),
@@ -320,17 +321,55 @@ def apply_document_to_plan(plan: CommunityEventPlan, document: dict) -> None:
     for field, value in plan_fields(document).items():
         setattr(plan, field, value)
     dates = [str(value) for value in document.get("operation_dates", []) if str(value)]
-    requirements = [
-        {
-            "name": str(item.get("name", "")).strip(),
-            "people_count": int(item.get("people_count", 0)),
-            "role_description": str(item.get("role_description", "")).strip(),
-            "start_time": str(item.get("start_time") or "").strip() or None,
-            "end_time": str(item.get("end_time") or "").strip() or None,
-        }
-        for item in document.get("team_requirements", [])
-        if isinstance(item, dict)
-    ]
+    try:
+        dates = [date.fromisoformat(value).isoformat() for value in dates]
+    except ValueError as error:
+        raise AppError(422, "invalid_operation_dates", "운영 날짜를 달력에서 다시 선택해 주세요.") from error
+    requirements: list[dict] = []
+    for item in document.get("team_requirements", []):
+        if not isinstance(item, dict):
+            raise AppError(422, "invalid_team_requirements", "조 이름, 필요 인원, 역할을 확인해 주세요.")
+        try:
+            people_count = int(item.get("people_count"))
+        except (TypeError, ValueError) as error:
+            raise AppError(
+                422,
+                "invalid_team_requirements",
+                "조 이름, 필요 인원, 역할을 확인해 주세요.",
+            ) from error
+        raw_team_dates = item.get("operation_dates", dates)
+        if raw_team_dates is None:
+            raw_team_dates = dates
+        if not isinstance(raw_team_dates, list):
+            raise AppError(
+                422,
+                "invalid_team_operation_dates",
+                "각 조가 운영할 날짜를 선택해 주세요.",
+            )
+        try:
+            team_dates = [date.fromisoformat(str(value)).isoformat() for value in raw_team_dates]
+        except ValueError as error:
+            raise AppError(
+                422,
+                "invalid_team_operation_dates",
+                "각 조가 운영할 날짜를 선택해 주세요.",
+            ) from error
+        if len(team_dates) != len(set(team_dates)) or not set(team_dates).issubset(set(dates)):
+            raise AppError(
+                422,
+                "invalid_team_operation_dates",
+                "조 운영 날짜는 위에서 선택한 운영 날짜 중에서 골라 주세요.",
+            )
+        requirements.append(
+            {
+                "name": str(item.get("name", "")).strip(),
+                "people_count": people_count,
+                "role_description": str(item.get("role_description", "")).strip(),
+                "start_time": str(item.get("start_time") or "").strip() or None,
+                "end_time": str(item.get("end_time") or "").strip() or None,
+                "operation_dates": team_dates,
+            }
+        )
     if len(dates) != len(set(dates)):
         raise AppError(422, "duplicate_operation_dates", "운영 날짜는 중복될 수 없습니다.")
     if any(
@@ -343,7 +382,16 @@ def apply_document_to_plan(plan: CommunityEventPlan, document: dict) -> None:
     plan.operation_dates = dates or None
     plan.operation_days = len(dates) or None
     plan.team_requirements = requirements or None
-    plan.teams_per_day = len(requirements) or None
+    plan.teams_per_day = (
+        max(
+            (
+                sum(1 for item in requirements if value in item["operation_dates"])
+                for value in dates
+            ),
+            default=0,
+        )
+        or None
+    )
     plan.people_per_team = max((item["people_count"] for item in requirements), default=None)
     plan.team_role_description = (
         " / ".join(f"{item['name']}: {item['role_description']}" for item in requirements)
@@ -356,7 +404,9 @@ def apply_document_to_plan(plan: CommunityEventPlan, document: dict) -> None:
             plan.team_manager_id = uuid.UUID(str(manager_id))
         except ValueError as error:
             raise AppError(422, "invalid_team_manager", "조 편성 담당자를 다시 선택해 주세요.") from error
-    else:
+    elif "team_manager_id" in document:
+        plan.team_manager_id = None
+    elif plan.team_manager_id is None:
         plan.team_manager_id = plan.team_manager_id or plan.author_id
     plan.poster_required = bool(document.get("poster_required", False))
 
@@ -1173,7 +1223,7 @@ async def promote_proposal_to_agenda(
 ):
     proposal = await get_proposal(db, proposal_id, user, for_update=True)
     count = await proposal_recommendations(db, proposal)
-    if user.role not in {Role.DEPARTMENT_HEAD, Role.EXECUTIVE_BOARD} and (
+    if user.role not in WORKFLOW_MANAGER_ROLES and (
         count < settings.proposal_agenda_recommendation_threshold
     ):
         raise AppError(
@@ -1519,20 +1569,21 @@ async def update_proposal_final_plan(
     if plan.status not in EDITABLE_PLAN_STATUSES:
         raise AppError(409, "proposal_plan_locked", "교사 검토 중인 기획서는 수정할 수 없습니다.")
     apply_document_to_plan(plan, data.document)
-    manager = await db.scalar(
-        select(User).where(
-            User.id == plan.team_manager_id,
-            User.term_id == user.term_id,
-            User.is_active.is_(True),
-            User.role != Role.TEACHER,
+    if plan.team_manager_id is not None:
+        manager = await db.scalar(
+            select(User).where(
+                User.id == plan.team_manager_id,
+                User.term_id == user.term_id,
+                User.is_active.is_(True),
+                User.role != Role.TEACHER,
+            )
         )
-    )
-    if not manager:
-        raise AppError(
-            422,
-            "invalid_team_manager",
-            "현재 기수의 활성 학생 임원 중에서 조 편성 담당자를 선택해 주세요.",
-        )
+        if not manager:
+            raise AppError(
+                422,
+                "invalid_team_manager",
+                "현재 기수의 활성 학생 임원 중에서 조 편성 담당자를 선택해 주세요.",
+            )
     plan.version += 1
     db.add(
         CommunityPlanRevision(

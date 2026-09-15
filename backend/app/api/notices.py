@@ -34,11 +34,36 @@ def can_edit_notice(notice: Notice, user: User) -> bool:
     )
 
 
-def notice_out(notice: Notice, user: User, recipient_ids: set[uuid.UUID]) -> NoticeOut:
+async def notice_out(
+    db: AsyncSession, notice: Notice, user: User, recipient_ids: set[uuid.UUID]
+) -> NoticeOut:
+    recipient = await db.scalar(
+        select(NoticeRecipient).where(
+            NoticeRecipient.notice_id == notice.id, NoticeRecipient.user_id == user.id
+        )
+    )
+    application = await db.scalar(
+        select(NoticeApplication).where(
+            NoticeApplication.notice_id == notice.id, NoticeApplication.user_id == user.id
+        )
+    )
+    applied_count = await db.scalar(
+        select(func.count()).select_from(NoticeApplication).where(
+            NoticeApplication.notice_id == notice.id,
+            NoticeApplication.status.in_([ApplicationStatus.ACCEPTED, ApplicationStatus.WAITING]),
+        )
+    )
     return NoticeOut.model_validate(notice).model_copy(
         update={
             "recipient_ids": list(recipient_ids) if can_edit_notice(notice, user) else [],
             "can_edit": can_edit_notice(notice, user),
+            "read": bool(recipient and recipient.read_at),
+            "applied_count": applied_count or 0,
+            "application_status": (
+                application.status
+                if application and application.status != ApplicationStatus.CANCELLED
+                else None
+            ),
         }
     )
 
@@ -92,7 +117,7 @@ async def list_notices(user: User = Depends(current_user), db: AsyncSession = De
         (await db.scalars(stmt.order_by(Notice.pinned.desc(), Notice.created_at.desc()))).all()
     )
     recipients = await notice_recipients(db, [notice.id for notice in notices])
-    return [notice_out(notice, user, recipients[notice.id]) for notice in notices]
+    return [await notice_out(db, notice, user, recipients[notice.id]) for notice in notices]
 
 
 @router.post("/notices", response_model=NoticeOut, status_code=201)
@@ -121,7 +146,7 @@ async def create_notice(
             target_type="notice",
             target_id=notice.id,
         )
-    return notice_out(notice, actor, recipient_ids)
+    return await notice_out(db, notice, actor, recipient_ids)
 
 
 @router.patch("/notices/{notice_id}", response_model=NoticeOut)
@@ -174,7 +199,7 @@ async def update_notice(
         )
         recipient_ids = updated_ids
     await db.commit()
-    return notice_out(notice, actor, recipient_ids)
+    return await notice_out(db, notice, actor, recipient_ids)
 
 
 @router.delete("/notices/{notice_id}", status_code=204)

@@ -71,6 +71,33 @@ describe("createFormationPlan", () => {
     expect(plan.teams.map(team => team.scheduleAt)).toEqual(["2026-09-25T07:40", "2026-09-25T15:20"]);
   });
 
+  it("기획서에서 날짜별로 선택한 조만 해당 날짜에 편성한다", () => {
+    const plan = createFormationPlan({
+      people,
+      teamsPerDay: 2,
+      dates: ["2026-09-25", "2026-09-26"],
+      requirements: [
+        {
+          name: "등교조",
+          peopleCount: 2,
+          roleDescription: "등교 안내",
+          operationDates: ["2026-09-25"],
+        },
+        {
+          name: "정리조",
+          peopleCount: 2,
+          roleDescription: "행사 정리",
+          operationDates: ["2026-09-26"],
+        },
+      ],
+    });
+
+    expect(plan.teams.map(team => [team.name, team.scheduleAt])).toEqual([
+      ["9월 25일 등교조", "2026-09-25T09:00"],
+      ["9월 26일 정리조", "2026-09-26T09:00"],
+    ]);
+  });
+
   it("인원보다 조가 많으면 빈 조를 안내한다", () => {
     const plan = createFormationPlan({
       people: people.slice(0, 2),
